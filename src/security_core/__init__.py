@@ -18,6 +18,7 @@ from security_core.pdp import (
     RoleGraph,
 )
 from security_core.cel_evaluator import CELEvaluator
+from security_core.registry import SecurityRegistry
 from security_core.audit import (
     AuditEvent,
     AuditManager,
@@ -58,6 +59,7 @@ __all__ = [
     "EmbeddedPolicyEngine",
     "RoleGraph",
     "CELEvaluator",
+    "SecurityRegistry",
     "AuditEvent",
     "AuditManager",
     "AuditPublisherSPI",

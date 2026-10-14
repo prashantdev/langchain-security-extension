@@ -216,6 +216,9 @@ def secured_tool(
 
             # Resolve PDP engine if None
             engine = pdp_engine
+            if engine is None and args and hasattr(args[0], "pdp_engine") and getattr(args[0], "pdp_engine") is not None:
+                engine = getattr(args[0], "pdp_engine")
+
             if engine is None and "config" in kwargs and isinstance(kwargs["config"], dict):
                 cfg_conf = kwargs["config"].get("configurable", {})
                 if isinstance(cfg_conf, dict):
@@ -233,28 +236,28 @@ def secured_tool(
                                 break
 
             if engine is None:
-                try:
-                    from app.security.security_integration import get_pdp_engine
-                    engine = get_pdp_engine()
-                except Exception:
-                    from security_core.pdp import EmbeddedPolicyEngine
-                    engine = EmbeddedPolicyEngine.create()
+                from security_core.registry import SecurityRegistry
+                engine = SecurityRegistry.get_pdp_engine()
+
+            if engine is None:
+                from security_core.pdp import EmbeddedPolicyEngine
+                engine = EmbeddedPolicyEngine.create()
 
             resolved_resolver = entity_resolver
+            if resolved_resolver is None and args and hasattr(args[0], "entity_resolver") and getattr(args[0], "entity_resolver") is not None:
+                resolved_resolver = getattr(args[0], "entity_resolver")
+
             if resolved_resolver is None and "config" in kwargs and isinstance(kwargs["config"], dict):
                 cfg_conf = kwargs["config"].get("configurable", {})
                 if isinstance(cfg_conf, dict):
                     resolved_resolver = cfg_conf.get("sec:entity_resolver") or cfg_conf.get("entity_resolver")
 
-            if resolved_resolver is None:
-                try:
-                    from app.security.entity_resolver import entity_resolver_instance
-                    resolved_resolver = entity_resolver_instance
-                except Exception:
-                    pass
-
             if resolved_resolver is None and engine is not None and hasattr(engine, "_cel_evaluator") and engine._cel_evaluator:
                 resolved_resolver = getattr(engine._cel_evaluator, "entity_resolver", None)
+
+            if resolved_resolver is None:
+                from security_core.registry import SecurityRegistry
+                resolved_resolver = SecurityRegistry.get_entity_resolver()
 
             if resolved_resolver and hasattr(engine, "_cel_evaluator") and engine._cel_evaluator:
                 engine._cel_evaluator.entity_resolver = resolved_resolver
