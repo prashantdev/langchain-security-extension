@@ -216,21 +216,45 @@ def secured_tool(
 
             # Resolve PDP engine if None
             engine = pdp_engine
+            if engine is None and "config" in kwargs and isinstance(kwargs["config"], dict):
+                cfg_conf = kwargs["config"].get("configurable", {})
+                if isinstance(cfg_conf, dict):
+                    engine = cfg_conf.get("sec:pdp_engine") or cfg_conf.get("pdp_engine")
+                    if engine is None:
+                        vh = cfg_conf.get("sec:violation_handler")
+                        if vh and hasattr(vh, "pdp_engine"):
+                            engine = vh.pdp_engine
+                if engine is None:
+                    callbacks_list = kwargs["config"].get("callbacks", [])
+                    if isinstance(callbacks_list, list):
+                        for cb in callbacks_list:
+                            if hasattr(cb, "pdp_engine"):
+                                engine = cb.pdp_engine
+                                break
+
             if engine is None:
                 try:
                     from app.security.security_integration import get_pdp_engine
                     engine = get_pdp_engine()
                 except Exception:
-                    from security_core.pdp import EmbeddedPolicyEngine, RoleGraph
-                    engine = EmbeddedPolicyEngine.create(RoleGraph())
+                    from security_core.pdp import EmbeddedPolicyEngine
+                    engine = EmbeddedPolicyEngine.create()
 
             resolved_resolver = entity_resolver
+            if resolved_resolver is None and "config" in kwargs and isinstance(kwargs["config"], dict):
+                cfg_conf = kwargs["config"].get("configurable", {})
+                if isinstance(cfg_conf, dict):
+                    resolved_resolver = cfg_conf.get("sec:entity_resolver") or cfg_conf.get("entity_resolver")
+
             if resolved_resolver is None:
                 try:
                     from app.security.entity_resolver import entity_resolver_instance
                     resolved_resolver = entity_resolver_instance
                 except Exception:
                     pass
+
+            if resolved_resolver is None and engine is not None and hasattr(engine, "_cel_evaluator") and engine._cel_evaluator:
+                resolved_resolver = getattr(engine._cel_evaluator, "entity_resolver", None)
 
             if resolved_resolver and hasattr(engine, "_cel_evaluator") and engine._cel_evaluator:
                 engine._cel_evaluator.entity_resolver = resolved_resolver
@@ -315,12 +339,7 @@ def secured_tool(
                     if prev_args is not None and prev_args != bound_args:
                         param_escalation_detected = True
 
-                diag_reason_str = str(decision.diagnostic_reason) if decision.diagnostic_reason else ""
-                is_cel_violation = bool("CEL" in diag_reason_str or "Parameter Constraint" in diag_reason_str)
-                if is_cel_violation:
-                    strategy = STRATEGY_HARD_ABORT
-                else:
-                    strategy = decision.obligations.get("strategy", STRATEGY_HARD_ABORT if is_mutative else STRATEGY_RETURN_FEEDBACK)
+                strategy = decision.obligations.get("strategy", STRATEGY_HARD_ABORT if is_mutative else STRATEGY_RETURN_FEEDBACK)
                 reason_msg = f"Policy violation: Access denied for tool '{tool_name}' ({decision.diagnostic_reason})"
 
                 if param_escalation_detected and hasattr(engine, "audit_manager") and engine.audit_manager:
@@ -343,7 +362,49 @@ def secured_tool(
                         reason_code=EVENT_PARAMETER_PRIVILEGE_ESCALATION,
                     ))
 
-                if strategy == STRATEGY_HARD_ABORT or is_mutative or retries > 2:
+                # Record violation with registered ToolViolationHandler if present in config
+                vh = None
+                if isinstance(cfg, dict) and isinstance(cfg.get("configurable"), dict):
+                    vh = cfg["configurable"].get("sec:violation_handler")
+
+                resolution = None
+                if vh is not None and hasattr(vh, "record_tool_violation"):
+                    resolution = vh.record_tool_violation(
+                        tool_name=tool_name,
+                        diagnostic_reason=str(decision.diagnostic_reason or ""),
+                        is_mutative=is_mutative,
+                        config=cfg,
+                        caller_identity=caller_identity,
+                    )
+                elif isinstance(cfg, dict) and isinstance(cfg.get("configurable"), dict):
+                    from security_adapter_langchain.violation_handler import (
+                        ViolationResolution,
+                        STATUS_BLOCKED_BY_POLICY,
+                        REMED_SEC_BLOCKED_POLICY,
+                        REMED_EXEC_ABORTED,
+                    )
+                    should_abort_flag = bool(strategy == STRATEGY_HARD_ABORT or is_mutative or retries > 2)
+                    resolution = ViolationResolution.create(
+                        status=STATUS_BLOCKED_BY_POLICY if should_abort_flag else "ACCESS_DENIED",
+                        action_entry=f"Blocked execution of tool '{tool_name}' ({decision.diagnostic_reason})",
+                        root_cause=f"Policy violation: Access denied for tool '{tool_name}' ({decision.diagnostic_reason})",
+                        user_message=reason_msg,
+                        remediation_security=REMED_SEC_BLOCKED_POLICY if should_abort_flag else "FEEDBACK_REFUSAL",
+                        remediation_execution=REMED_EXEC_ABORTED if should_abort_flag else "SYNTHETIC_PAYLOAD",
+                        should_abort=should_abort_flag,
+                        diagnostic_reason=decision.diagnostic_reason,
+                        tool_name=tool_name,
+                    )
+                    cfg["configurable"]["sec:last_violation"] = resolution
+
+                should_hard_abort = bool(
+                    strategy == STRATEGY_HARD_ABORT
+                    or is_mutative
+                    or retries > 2
+                    or (resolution and resolution.should_abort)
+                )
+
+                if should_hard_abort:
                     if retries > 2 and hasattr(engine, "audit_manager") and engine.audit_manager:
                         from security_core.audit import AuditEvent
                         from security_core.constants import (
@@ -376,6 +437,10 @@ def secured_tool(
                         "diagnostic_reason": decision.diagnostic_reason,
                     }
                     return refusal_payload
+
+            cfg = kwargs.get("config")
+            if isinstance(cfg, dict) and isinstance(cfg.get("configurable"), dict):
+                cfg["configurable"]["sec:last_violation"] = None
 
             func_kwargs = dict(kwargs)
             func_kwargs.pop("config", None)

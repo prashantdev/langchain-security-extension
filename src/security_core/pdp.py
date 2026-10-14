@@ -614,6 +614,7 @@ class EmbeddedPolicyEngine(PolicyDecisionEngine):
         self._rules = list(rules) if rules is not None else []
         self._cache = decision_cache if isinstance(decision_cache, TwoTierDecisionCache) else TwoTierDecisionCache.create()
         self.enforce_strict_tenant_isolation = True
+        self._invalidation_callbacks: List[Any] = []
 
     @classmethod
     def create(cls):
@@ -672,9 +673,18 @@ class EmbeddedPolicyEngine(PolicyDecisionEngine):
         """Get the configured TwoTierDecisionCache."""
         return self._cache
 
+    def register_invalidation_callback(self, callback: Any) -> None:
+        """Register a callback to be invoked upon cache eviction or subject invalidation."""
+        self._invalidation_callbacks.append(callback)
+
     def clear_cache(self) -> None:
         """Flush all Tier 2 static cache entries."""
         self._cache.flush()
+        for cb in list(getattr(self, "_invalidation_callbacks", [])):
+            try:
+                cb()
+            except Exception:
+                pass
 
     def evict_subject_cache(self, subject_id: str, *args: Any, **kwargs: Any) -> int:
         """Evict cached decisions for a subject upon role revocation and emit an audit event.
@@ -688,6 +698,11 @@ class EmbeddedPolicyEngine(PolicyDecisionEngine):
             int: Count of evicted entries.
         """
         evicted_count = self._cache.evict_subject(subject_id, *args, **kwargs)
+        for cb in list(getattr(self, "_invalidation_callbacks", [])):
+            try:
+                cb(subject_id)
+            except Exception:
+                pass
         event = AuditEvent.create(
             subject_id=subject_id,
             tenant_id=str(kwargs.get("tenant_id", "DEFAULT")),

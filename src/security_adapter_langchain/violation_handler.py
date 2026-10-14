@@ -199,6 +199,14 @@ class AbuseThrottleTracker:
         timestamps = self._prune(subject_id, timestamp)
         return len(timestamps) >= self._max_denials
 
+    def reset(self, *args: Any, **kwargs: Any) -> None:
+        """Reset denial history for a subject or all subjects."""
+        subject_id = args[0] if len(args) > 0 else kwargs.get("subject_id")
+        if subject_id is not None:
+            self._denial_history.pop(str(subject_id), None)
+        else:
+            self._denial_history.clear()
+
 
 class ToolViolationHandler:
     """PEP violation handler integrating retry tracking, abuse throttling, and fallback generation."""
@@ -212,6 +220,12 @@ class ToolViolationHandler:
         self._pdp_engine = pdp_engine
         self._retry_tracker = retry_tracker
         self._abuse_tracker = abuse_tracker
+        if hasattr(self._pdp_engine, "register_invalidation_callback"):
+            self._pdp_engine.register_invalidation_callback(self.reset_abuse)
+
+    def reset_abuse(self, *args: Any, **kwargs: Any) -> None:
+        """Reset abuse tracking for subject or all subjects."""
+        self._abuse_tracker.reset(*args, **kwargs)
 
     @classmethod
     def create(
@@ -251,18 +265,20 @@ class ToolViolationHandler:
     def abuse_tracker(self) -> AbuseThrottleTracker:
         return self._abuse_tracker
 
-    def resolve_tool_exception(
+    def record_tool_violation(
         self,
-        exc: Exception,
+        tool_name: str,
+        diagnostic_reason: str,
+        is_mutative: bool,
         config: Optional[Dict[str, Any]],
+        caller_identity: Optional[SecurityIdentity],
     ) -> ViolationResolution:
-        tool_name = getattr(exc, "tool_name", "unknown_tool")
-        diagnostic_reason = getattr(exc, "diagnostic_reason", None) or str(exc)
-
+        """Records a tool policy violation, tracks abuse/retries, and returns structured resolution."""
         is_budget_exceeded = self._retry_tracker.is_budget_exceeded(config)
-        caller_identity = IdentityBridge.extract_from_config(config)
+        is_abusing = False
 
         if caller_identity is not None and self._abuse_tracker.record_denial(caller_identity.subject_id, time.time()):
+            is_abusing = True
             audit_mgr = getattr(self._pdp_engine, "audit_manager", None)
             if audit_mgr is not None:
                 audit_mgr.record_event(
@@ -300,19 +316,35 @@ class ToolViolationHandler:
             root_cause = "Policy Abort: POLICY_BRUTE_FORCE_SCANNING"
             user_msg = f"Execution halted: retry budget exceeded (POLICY_BRUTE_FORCE_DETECTED on {tool_name})"
             action_entry = f"Blocked execution of tool '{tool_name}' (retry budget exceeded)"
-        else:
+            should_abort = True
+            status = STATUS_BLOCKED_BY_POLICY
+            remed_sec = REMED_SEC_BLOCKED_POLICY
+            remed_exec = REMED_EXEC_ABORTED
+        elif is_mutative:
             root_cause = f"Policy violation: Access denied for tool '{tool_name}' ({diagnostic_reason})"
             user_msg = f"Policy violation: Access denied for tool '{tool_name}' ({diagnostic_reason})"
             action_entry = f"Blocked execution of tool '{tool_name}' ({diagnostic_reason})"
+            should_abort = True
+            status = STATUS_BLOCKED_BY_POLICY
+            remed_sec = REMED_SEC_BLOCKED_POLICY
+            remed_exec = REMED_EXEC_ABORTED
+        else:
+            root_cause = f"Policy restriction: Informational tool '{tool_name}' access denied ({diagnostic_reason})"
+            user_msg = f"Policy restriction: Informational tool '{tool_name}' access denied ({diagnostic_reason})"
+            action_entry = f"Blocked execution of tool '{tool_name}' ({diagnostic_reason})"
+            should_abort = is_abusing
+            status = STATUS_BLOCKED_BY_POLICY if is_abusing else "ACCESS_DENIED"
+            remed_sec = REMED_SEC_BLOCKED_POLICY if is_abusing else "FEEDBACK_REFUSAL"
+            remed_exec = REMED_EXEC_ABORTED if is_abusing else "SYNTHETIC_PAYLOAD"
 
         resolution = ViolationResolution.create(
-            status=STATUS_BLOCKED_BY_POLICY,
+            status=status,
             action_entry=action_entry,
             root_cause=root_cause,
             user_message=user_msg,
-            remediation_security=REMED_SEC_BLOCKED_POLICY,
-            remediation_execution=REMED_EXEC_ABORTED,
-            should_abort=True,
+            remediation_security=remed_sec,
+            remediation_execution=remed_exec,
+            should_abort=should_abort,
             diagnostic_reason=diagnostic_reason,
             tool_name=tool_name,
         )
@@ -321,6 +353,22 @@ class ToolViolationHandler:
             config["configurable"][CONFIG_LAST_VIOLATION_KEY] = resolution
 
         return resolution
+
+    def resolve_tool_exception(
+        self,
+        exc: Exception,
+        config: Optional[Dict[str, Any]],
+    ) -> ViolationResolution:
+        tool_name = getattr(exc, "tool_name", "unknown_tool")
+        diagnostic_reason = getattr(exc, "diagnostic_reason", None) or str(exc)
+        caller_identity = IdentityBridge.extract_from_config(config)
+        return self.record_tool_violation(
+            tool_name,
+            diagnostic_reason,
+            True,
+            config,
+            caller_identity,
+        )
 
 
 __all__ = [

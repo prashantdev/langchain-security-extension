@@ -135,6 +135,16 @@ class RemotePDPAdapter(PolicyDecisionEngine):
             return self._fallback_engine.decision_cache
         return None
 
+    def register_invalidation_callback(self, callback: Any) -> None:
+        """Register a callback for cache invalidation events."""
+        if self._fallback_engine and hasattr(self._fallback_engine, "register_invalidation_callback"):
+            self._fallback_engine.register_invalidation_callback(callback)
+        else:
+            callbacks = getattr(self, "_invalidation_callbacks", None)
+            if callbacks is None:
+                self._invalidation_callbacks = []
+            self._invalidation_callbacks.append(callback)
+
     def clear_cache(self) -> None:
         """Flush decision cache."""
         self.invalidate_cache()

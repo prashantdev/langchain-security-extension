@@ -147,6 +147,10 @@ class SecureRunnable:
             configurable.update(inv_params.serialize_to_state())
 
         if self._pdp_engine is not None:
+            configurable["sec:pdp_engine"] = self._pdp_engine
+            cel_eval = getattr(self._pdp_engine, "_cel_evaluator", None)
+            if cel_eval and getattr(cel_eval, "entity_resolver", None):
+                configurable["sec:entity_resolver"] = cel_eval.entity_resolver
             callbacks = config.setdefault("callbacks", [])
             if isinstance(callbacks, list) and not any(isinstance(cb, SecureCallbackHandler) for cb in callbacks):
                 callbacks.append(SecureCallbackHandler.create(pdp_engine=self._pdp_engine, security_identity=identity))
