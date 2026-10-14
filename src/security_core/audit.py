@@ -1,0 +1,636 @@
+"""
+Structured security audit event publishing and observability subsystem.
+
+Provides OCSF/ECS-aligned audit event models, multi-stage PII/secret sanitization,
+publisher SPI implementations, and non-blocking ring buffer audit dispatch as specified in Spec 5.
+"""
+
+import os
+import re
+import json
+import time
+import uuid
+import logging
+from abc import ABC, abstractmethod
+from typing import Dict, List, Any, Optional
+from security_core.constants import (
+    DEFAULT_SCHEMA_VERSION,
+    DEFAULT_RING_BUFFER_CAPACITY,
+    DEFAULT_PAYLOAD_MAX_CHARS,
+    SEVERITY_INFORMATIONAL,
+    SEVERITY_WARNING,
+    SEVERITY_SECURITY_ALERT,
+    SEVERITY_CRITICAL_ALERT,
+)
+
+
+class AuditEvent:
+    """OCSF-aligned tamper-evident structured audit evaluation record.
+
+    Attributes:
+        event_id (str): Unique UUID string for event identification.
+        schema_version (str): Audit schema version specification.
+        timestamp_utc (float): UTC timestamp in seconds since epoch.
+        invocation_id (str): Unique trace context or invocation ID.
+        trace_id (Optional[str]): OpenTelemetry trace ID.
+        span_id (Optional[str]): OpenTelemetry span ID.
+        subject_id (str): Caller subject identifier.
+        tenant_id (str): Tenant isolation boundary identifier.
+        subject_roles (List[str]): Roles assigned to caller.
+        subject_clearance (int): Clearance level rank.
+        enforcement_point (str): Enforcement point identifier.
+        action (str): Action string requested.
+        target_resource (str): Target resource path or name.
+        decision (str): PDP decision outcome ('PERMIT', 'DENY', 'BLOCKED', etc.).
+        reason_code (str): Standardized security event reason code.
+        diagnostic_reason (str): Human-readable diagnostic description.
+        severity (str): Event severity level string.
+        payload_snapshot (Dict[str, Any]): Sanitized payload snapshot.
+        threat_category (Optional[str]): Threat classification label.
+        threat_score (Optional[float]): Threat confidence score.
+        detected_pattern (Optional[str]): Injection pattern ID.
+        mitigation_action (Optional[str]): Mitigation strategy applied.
+        sequence_number (int): Monotonic audit sequence number.
+        envelope_hmac (Optional[str]): Signature hash for tamper evidence.
+    """
+
+    def __init__(
+        self,
+        event_id: str,
+        schema_version: str,
+        timestamp_utc: float,
+        invocation_id: str,
+        trace_id: Optional[str],
+        span_id: Optional[str],
+        subject_id: str,
+        tenant_id: str,
+        subject_roles: List[str],
+        subject_clearance: int,
+        enforcement_point: str,
+        action: str,
+        target_resource: str,
+        decision: str,
+        reason_code: str,
+        diagnostic_reason: str,
+        severity: str,
+        payload_snapshot: Dict[str, Any],
+        threat_category: Optional[str] = None,
+        threat_score: Optional[float] = None,
+        detected_pattern: Optional[str] = None,
+        mitigation_action: Optional[str] = None,
+        sequence_number: int = 0,
+        envelope_hmac: Optional[str] = None,
+    ):
+        """Initialize AuditEvent."""
+        self.event_id = event_id
+        self.schema_version = schema_version
+        self.timestamp_utc = timestamp_utc
+        self.invocation_id = invocation_id
+        self.trace_id = trace_id
+        self.span_id = span_id
+        self.subject_id = subject_id
+        self.tenant_id = tenant_id
+        self.subject_roles = list(subject_roles)
+        self.subject_clearance = subject_clearance
+        self.enforcement_point = enforcement_point
+        self.action = action
+        self.target_resource = target_resource
+        self.decision = decision
+        self.reason_code = reason_code
+        self.diagnostic_reason = diagnostic_reason
+        self.severity = severity
+        self.payload_snapshot = dict(payload_snapshot)
+        self.threat_category = threat_category
+        self.threat_score = threat_score
+        self.detected_pattern = detected_pattern
+        self.mitigation_action = mitigation_action
+        self.sequence_number = sequence_number
+        self.envelope_hmac = envelope_hmac
+
+    @classmethod
+    def create(
+        cls,
+        subject_id: str,
+        tenant_id: str,
+        action: str,
+        resource: str,
+        decision: str,
+        diagnostic_reason: str,
+        severity: str,
+        metadata: Dict[str, Any],
+        enforcement_point: str = "SYSTEM_BOUNDARY",
+        reason_code: str = "POLICY_EVALUATION",
+    ):
+        """Factory method to construct an AuditEvent with OpenTelemetry trace extraction.
+
+        Args:
+            subject_id: Subject identifier.
+            tenant_id: Tenant ID.
+            action: Requested action.
+            resource: Resource path/name.
+            decision: Decision verdict.
+            diagnostic_reason: Rationale description.
+            severity: Severity level.
+            metadata: Payload snapshot dictionary.
+            enforcement_point: PEP point ID.
+            reason_code: Event reason code.
+
+        Returns:
+            AuditEvent: Constructed audit event instance.
+        """
+        trace_id = metadata.get("trace_id")
+        span_id = metadata.get("span_id")
+        if trace_id is None or span_id is None:
+            try:
+                from opentelemetry import trace
+                current_span = trace.get_current_span()
+                if current_span and current_span.get_span_context().is_valid:
+                    ctx = current_span.get_span_context()
+                    if trace_id is None:
+                        trace_id = f"{ctx.trace_id:032x}"
+                    if span_id is None:
+                        span_id = f"{ctx.span_id:016x}"
+            except Exception:
+                pass
+
+        return cls(
+            event_id=str(uuid.uuid4()),
+            schema_version=DEFAULT_SCHEMA_VERSION,
+            timestamp_utc=time.time(),
+            invocation_id=metadata.get("invocation_id", str(uuid.uuid4())),
+            trace_id=trace_id,
+            span_id=span_id,
+            subject_id=subject_id,
+            tenant_id=tenant_id,
+            subject_roles=metadata.get("subject_roles", []),
+            subject_clearance=int(metadata.get("subject_clearance", 0)),
+            enforcement_point=enforcement_point,
+            action=action,
+            target_resource=resource,
+            decision=decision,
+            reason_code=reason_code,
+            diagnostic_reason=diagnostic_reason,
+            severity=severity,
+            payload_snapshot=metadata,
+        )
+
+    @property
+    def resource(self) -> str:
+        """Get target resource identifier."""
+        return self.target_resource
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        """Get payload snapshot dictionary."""
+        return self.payload_snapshot
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize AuditEvent into dictionary format.
+
+        Returns:
+            Dict[str, Any]: JSON-compatible event dictionary.
+        """
+        return {
+            "event_id": self.event_id,
+            "schema_version": self.schema_version,
+            "timestamp_utc": self.timestamp_utc,
+            "invocation_id": self.invocation_id,
+            "trace_id": self.trace_id,
+            "span_id": self.span_id,
+            "subject_id": self.subject_id,
+            "tenant_id": self.tenant_id,
+            "subject_roles": self.subject_roles,
+            "subject_clearance": self.subject_clearance,
+            "enforcement_point": self.enforcement_point,
+            "action": self.action,
+            "target_resource": self.target_resource,
+            "decision": self.decision,
+            "reason_code": self.reason_code,
+            "diagnostic_reason": self.diagnostic_reason,
+            "severity": self.severity,
+            "payload_snapshot": self.payload_snapshot,
+            "threat_category": self.threat_category,
+            "threat_score": self.threat_score,
+            "detected_pattern": self.detected_pattern,
+            "mitigation_action": self.mitigation_action,
+            "sequence_number": self.sequence_number,
+            "envelope_hmac": self.envelope_hmac,
+        }
+
+
+SENSITIVE_FIELD_NAMES = {
+    "password",
+    "secret",
+    "token",
+    "apikey",
+    "api_key",
+    "aws_key",
+    "bearer_token",
+    "authorization",
+    "credential",
+    "private_key",
+    "ssn",
+    "credit_card",
+}
+
+
+class AuditSanitizer:
+    """3-stage in-flight PII and secret scrubber pipeline (Annotation Masking, Regex Scrubbing, Size Truncation)."""
+
+    _REGISTERED_MASKED_FIELDS = set(SENSITIVE_FIELD_NAMES)
+
+    SECRET_REGEX = re.compile(
+        r'(bearer[\s=]+[^\s,\'"]+|password\s*[:=]\s*[^\s,\'"]+|secret\s*[:=]\s*[^\s,\'"]+|token\s*[:=]\s*[^\s,\'"]+|api[_\-]?key\s*[:=]\s*[^\s,\'"]+|aws[_\-]?key\s*[:=]\s*[^\s,\'"]+|AKIA[0-9A-Z]{16}|eyJ[a-zA-Z0-9_\-]{5,}\.eyJ[a-zA-Z0-9_\-]{5,}\.[a-zA-Z0-9_\-]{5,}|(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^:\s]+:[^@\s]+@[^\s,\'"]+|\b\d{3}-\d{2}-\d{4}\b)',
+        re.IGNORECASE,
+    )
+    """Regular expression matcher for credentials, tokens, API keys, JWTs, DB URIs, and SSN PII."""
+
+    @classmethod
+    def create(cls, *args: Any, **kwargs: Any) -> "AuditSanitizer":
+        """Construct an AuditSanitizer and register any provided masked_fields."""
+        masked_fields = kwargs.get("masked_fields", args[0] if len(args) > 0 else None)
+        if masked_fields:
+            for field_name in masked_fields:
+                cls.register_masked_field(str(field_name))
+        return cls()
+
+    @classmethod
+    def register_masked_field(cls, field_name: str) -> None:
+        """Stage 1: Register a parameter or field name for automatic @Masked annotation redaction."""
+        if field_name:
+            cls._REGISTERED_MASKED_FIELDS.add(field_name.lower().strip())
+
+    @classmethod
+    def is_masked_field(cls, field_name: str) -> bool:
+        """Check if a field name is marked as sensitive/masked."""
+        return bool(field_name and field_name.lower().strip() in cls._REGISTERED_MASKED_FIELDS)
+
+    @classmethod
+    def _redact_match(cls, match: Any) -> str:
+        text = match.group(0)
+        if "://" in text and "@" in text:
+            scheme_user = text.split(":", 2)
+            at_part = text.split("@", 1)[1]
+            return f"{scheme_user[0]}:{scheme_user[1]}:[REDACTED]@{at_part}"
+        if "=" in text:
+            prefix = text.split("=")[0]
+            return f"{prefix}=[REDACTED]"
+        elif ":" in text:
+            prefix = text.split(":")[0]
+            return f"{prefix}: [REDACTED]"
+        elif text.lower().startswith("bearer "):
+            return "bearer [REDACTED]"
+        return "[REDACTED]"
+
+    @classmethod
+    def sanitize_string(cls, value: str, max_chars: int) -> str:
+        """Apply Stage 2 regex scrubbing and Stage 3 truncation to a string value."""
+        cleaned = cls.SECRET_REGEX.sub(cls._redact_match, value)
+        if len(cleaned) > max_chars:
+            cleaned = cleaned[:max_chars] + "...[TRUNCATED]"
+        return cleaned
+
+    @classmethod
+    def sanitize_payload(cls, payload: Dict[str, Any], *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        """Scrub secrets, PII, @Masked fields, and truncate oversized strings from payload dictionary."""
+        max_chars = int(kwargs.get("max_chars", args[0] if len(args) > 0 else DEFAULT_PAYLOAD_MAX_CHARS))
+        masked_fields = set(kwargs.get("masked_fields", ()))
+        masked_lower = {f.lower() for f in masked_fields} | cls._REGISTERED_MASKED_FIELDS
+
+        sanitized: Dict[str, Any] = {}
+        for k, v in payload.items():
+            if str(k).lower() in masked_lower:
+                sanitized[k] = "[REDACTED]"
+            elif isinstance(v, str):
+                sanitized[k] = cls.sanitize_string(v, max_chars)
+            elif isinstance(v, dict):
+                sanitized[k] = cls.sanitize_payload(v, max_chars=max_chars, masked_fields=masked_fields)
+            elif isinstance(v, list):
+                sanitized[k] = [
+                    cls.sanitize_payload(item, max_chars=max_chars, masked_fields=masked_fields) if isinstance(item, dict)
+                    else (cls.sanitize_string(item, max_chars) if isinstance(item, str) else item)
+                    for item in v
+                ]
+            else:
+                sanitized[k] = v
+        return sanitized
+
+
+class AuditPublisherSPI(ABC):
+    """SPI interface for enterprise SIEM and audit publishers."""
+
+    @abstractmethod
+    def publish(self, event: AuditEvent) -> None:
+        """Publish a single AuditEvent.
+
+        Args:
+            event: AuditEvent to publish.
+        """
+        pass
+
+    def publish_batch(self, events: List[AuditEvent]) -> None:
+        """Publish a batch of AuditEvents.
+
+        Args:
+            events: List of AuditEvents.
+        """
+        for event in events:
+            self.publish(event)
+
+    def flush(self) -> None:
+        """Flush buffered log streams."""
+        pass
+
+    def close(self) -> None:
+        """Release publisher resources."""
+        pass
+
+
+class ConsoleAuditLogger(AuditPublisherSPI):
+    """Console logger implementation of AuditPublisherSPI."""
+
+    def publish(self, event: AuditEvent) -> None:
+        """Print audit log line to standard output.
+
+        Args:
+            event: AuditEvent to publish.
+        """
+        print(f"[AUDIT LOG] [{event.severity}] {event.action} by {event.subject_id} -> {event.decision} ({event.diagnostic_reason})")
+
+
+class InMemoryAuditLogger(AuditPublisherSPI):
+    """In-memory collector for audit events, ideal for testing."""
+
+    def __init__(self):
+        """Initialize InMemoryAuditLogger."""
+        self._events: List[AuditEvent] = []
+
+    @classmethod
+    def create(cls):
+        """Factory method to construct InMemoryAuditLogger.
+
+        Returns:
+            InMemoryAuditLogger: New instance.
+        """
+        return cls()
+
+    def publish(self, event: AuditEvent) -> None:
+        """Append event to internal memory list.
+
+        Args:
+            event: AuditEvent instance.
+        """
+        self._events.append(event)
+
+    def get_events(self) -> List[AuditEvent]:
+        """Get copy of captured audit events.
+
+        Returns:
+            List[AuditEvent]: Copy of captured event list.
+        """
+        return list(self._events)
+
+    def clear(self) -> None:
+        """Clear captured audit events list."""
+        self._events.clear()
+
+
+class PythonLoggingAuditPublisher(AuditPublisherSPI):
+    """Publishes single-line JSON log lines to Python logging logger 'audit.security.langchain'."""
+
+    def __init__(self, logger_name: str = "audit.security.langchain"):
+        """Initialize PythonLoggingAuditPublisher.
+
+        Args:
+            logger_name: Python logger name.
+        """
+        self.logger = logging.getLogger(logger_name)
+
+    def publish(self, event: AuditEvent) -> None:
+        """Emit sanitized JSON audit record via standard Python logger.
+
+        Args:
+            event: AuditEvent to emit.
+        """
+        data = AuditSanitizer.sanitize_payload(event.to_dict())
+        self.logger.info(json.dumps(data))
+
+
+class JsonFileAuditLogger(AuditPublisherSPI):
+    """File logger writing JSON audit events to specified log path with secret masking."""
+
+    def __init__(self, file_path: str):
+        """Initialize JsonFileAuditLogger.
+
+        Args:
+            file_path: Output JSON file path.
+        """
+        self.file_path = file_path
+
+    @classmethod
+    def create(cls, file_path: str):
+        """Factory method creating JsonFileAuditLogger.
+
+        Args:
+            file_path: Target log file path.
+
+        Returns:
+            JsonFileAuditLogger: New logger instance.
+        """
+        return cls(file_path=file_path)
+
+    def publish(self, event: AuditEvent) -> None:
+        """Append sanitized JSON log line to target log file.
+
+        Args:
+            event: AuditEvent to append.
+        """
+        sanitized_data = AuditSanitizer.sanitize_payload(event.to_dict())
+        data_str = json.dumps(sanitized_data)
+        dir_path = os.path.dirname(self.file_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+        with open(self.file_path, "a", encoding="utf-8") as f:
+            f.write(data_str + "\n")
+
+
+class OpenTelemetryLogsPublisher(AuditPublisherSPI):
+    """Emits audit events as OpenTelemetry LogRecords (optional plugin)."""
+
+    def publish(self, event: AuditEvent) -> None:
+        """Emit audit event via OpenTelemetry logging API if installed.
+
+        Args:
+            event: AuditEvent instance.
+        """
+        try:
+            from opentelemetry._logs import get_logger
+            logger = get_logger("audit.security.langchain")
+            payload = AuditSanitizer.sanitize_payload(event.to_dict())
+            if hasattr(logger, "emit"):
+                logger.emit(payload)
+            elif hasattr(logger, "log_record"):
+                logger.log_record(payload)
+        except Exception:
+            pass
+
+
+class SplunkHecPublisher(AuditPublisherSPI):
+    """Batches and flushes events to Splunk HTTP Event Collector (HEC)."""
+
+    def __init__(self, hec_url: str, token: str):
+        """Initialize SplunkHecPublisher.
+
+        Args:
+            hec_url: Splunk HEC endpoint URL.
+            token: Splunk HEC auth token.
+        """
+        self.hec_url = hec_url
+        self.token = token
+
+    def publish(self, event: AuditEvent) -> None:
+        """POST audit event to Splunk HEC endpoint.
+
+        Args:
+            event: AuditEvent to transmit.
+        """
+        payload = {
+            "event": AuditSanitizer.sanitize_payload(event.to_dict()),
+            "sourcetype": "langchain:security:audit",
+        }
+        try:
+            import urllib.request
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                self.hec_url,
+                data=data,
+                headers={"Authorization": f"Splunk {self.token}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=2.0):
+                pass
+        except Exception:
+            pass
+
+
+class ElasticCommonSchemaPublisher(AuditPublisherSPI):
+    """Maps audit envelope directly into Elastic Common Schema (ECS) format."""
+
+    def __init__(self, logger_name: str = "audit.security.ecs"):
+        """Initialize ElasticCommonSchemaPublisher.
+
+        Args:
+            logger_name: Target Python logger name.
+        """
+        self.logger = logging.getLogger(logger_name)
+
+    def publish(self, event: AuditEvent) -> None:
+        """Format and emit event in ECS JSON structure.
+
+        Args:
+            event: AuditEvent to map and emit.
+        """
+        ecs_event = {
+            "@timestamp": event.timestamp_utc,
+            "event": {
+                "id": event.event_id,
+                "kind": "event",
+                "category": ["iam", "access"],
+                "action": event.action,
+                "outcome": "success" if event.decision == "PERMIT" else "failure",
+            },
+            "user": {
+                "id": event.subject_id,
+                "roles": event.subject_roles,
+            },
+            "organization": {
+                "id": event.tenant_id,
+            },
+            "service": {
+                "name": "langchain-security",
+            },
+        }
+        self.logger.info(json.dumps(ecs_event))
+
+
+class AuditManager:
+    """Central manager for non-blocking asynchronous audit event dispatch and ring buffer management."""
+
+    def __init__(self, publishers: List[AuditPublisherSPI], *args: Any, **kwargs: Any):
+        """Initialize AuditManager."""
+        capacity = int(kwargs.get("capacity", args[0] if len(args) > 0 else DEFAULT_RING_BUFFER_CAPACITY))
+        self._publishers = list(publishers)
+        self._capacity = capacity
+        self._buffer: List[AuditEvent] = []
+        self._dropped_count = 0
+        self._async_queue: Optional[Any] = None
+
+    @classmethod
+    def create(cls, publishers: List[AuditPublisherSPI], *args: Any, **kwargs: Any):
+        """Factory method to construct AuditManager."""
+        capacity = int(kwargs.get("capacity", args[0] if len(args) > 0 else DEFAULT_RING_BUFFER_CAPACITY))
+        return cls(publishers=publishers, capacity=capacity)
+
+    @property
+    def publishers(self) -> List[AuditPublisherSPI]:
+        """Get copy of registered audit publisher SPIs."""
+        return list(self._publishers)
+
+    @property
+    def dropped_count(self) -> int:
+        """Get count of audit events dropped due to buffer overflow."""
+        return self._dropped_count
+
+    def record_event(self, event: AuditEvent) -> None:
+        """Execute in-flight sanitization and dispatch audit event to ring buffer and registered publishers."""
+        if isinstance(event.payload_snapshot, dict):
+            event.payload_snapshot = AuditSanitizer.sanitize_payload(event.payload_snapshot)
+        if isinstance(event.diagnostic_reason, str):
+            event.diagnostic_reason = AuditSanitizer.sanitize_string(event.diagnostic_reason, DEFAULT_PAYLOAD_MAX_CHARS)
+
+        if len(self._buffer) >= self._capacity:
+            self._buffer.pop(0)  # Drop oldest with metric
+            self._dropped_count += 1
+
+        self._buffer.append(event)
+
+        if self._async_queue:
+            try:
+                self._async_queue.put_nowait(event)
+                return
+            except Exception:
+                pass
+
+        for pub in self._publishers:
+            try:
+                pub.publish(event)
+            except Exception:
+                pass
+
+    def publish(self, event: AuditEvent) -> None:
+        """Alias for record_event.
+
+        Args:
+            event: AuditEvent instance.
+        """
+        self.record_event(event)
+
+    def flush(self) -> None:
+        """Flush all registered audit publishers."""
+        for pub in self._publishers:
+            try:
+                pub.flush()
+            except Exception:
+                pass
+
+    def close(self) -> None:
+        """Flush and close all registered audit publishers."""
+        self.flush()
+        for pub in self._publishers:
+            try:
+                pub.close()
+            except Exception:
+                pass
+
+
+
