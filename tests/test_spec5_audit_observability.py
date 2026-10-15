@@ -108,6 +108,7 @@ class TestSpec5AuditObservability(unittest.TestCase):
             event.trace_id = SAMPLE_TRACE_ID
             event.span_id = SAMPLE_SPAN_ID
             manager.record_event(event)
+            manager.flush()
 
             with open(log_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()

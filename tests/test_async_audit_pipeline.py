@@ -58,3 +58,31 @@ class TestAsyncAuditPipeline(unittest.TestCase):
         manager.record_event(ev3)
 
         self.assertEqual(manager.dropped_count, 1)
+
+    def test_audit_manager_default_capacity_and_drop_oldest(self):
+        from security_core.constants import DEFAULT_RING_BUFFER_CAPACITY
+        logger = InMemoryAuditLogger.create()
+        manager = AuditManager.create(publishers=[logger])
+        self.assertEqual(manager._capacity, DEFAULT_RING_BUFFER_CAPACITY)
+        self.assertEqual(manager._capacity, 16384)
+
+    def test_audit_manager_async_worker_dispatches_to_external_publishers(self):
+        events_received = []
+
+        class ExternalSpyPublisher:
+            def publish(self, event):
+                events_received.append(event)
+            def flush(self):
+                pass
+            def close(self):
+                pass
+
+        spy = ExternalSpyPublisher()
+        manager = AuditManager.create(publishers=[spy])
+        ev = AuditEvent.create("u1", "t1", "act1", "res1", "PERMIT", "ok", "INFO", {})
+        manager.record_event(ev)
+        manager.flush()
+        self.assertEqual(len(events_received), 1)
+        self.assertEqual(events_received[0].subject_id, "u1")
+        manager.close()
+

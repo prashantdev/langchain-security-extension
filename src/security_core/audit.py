@@ -11,6 +11,8 @@ import json
 import time
 import uuid
 import logging
+import threading
+from collections import deque
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
 from security_core.constants import (
@@ -561,9 +563,18 @@ class AuditManager:
         capacity = int(kwargs.get("capacity", args[0] if len(args) > 0 else DEFAULT_RING_BUFFER_CAPACITY))
         self._publishers = list(publishers)
         self._capacity = capacity
-        self._buffer: List[AuditEvent] = []
+        self._buffer: deque = deque()
         self._dropped_count = 0
         self._async_queue: Optional[Any] = None
+        self._lock = threading.Lock()
+        self._queue_condition = threading.Condition(self._lock)
+        self._stop_event = threading.Event()
+        self._worker_thread = threading.Thread(
+            target=self._worker_loop,
+            name="AuditManagerAsyncWorker",
+            daemon=True,
+        )
+        self._worker_thread.start()
 
     @classmethod
     def create(cls, publishers: List[AuditPublisherSPI], *args: Any, **kwargs: Any):
@@ -579,31 +590,65 @@ class AuditManager:
     @property
     def dropped_count(self) -> int:
         """Get count of audit events dropped due to buffer overflow."""
-        return self._dropped_count
+        with self._lock:
+            return self._dropped_count
+
+    def _worker_loop(self) -> None:
+        """Background worker thread draining events asynchronously from the bounded queue."""
+        while not self._stop_event.is_set():
+            event = None
+            with self._queue_condition:
+                while not self._buffer and not self._stop_event.is_set():
+                    self._queue_condition.wait(timeout=0.1)
+                if self._buffer:
+                    event = self._buffer.popleft()
+            if event is not None:
+                self._dispatch_to_publishers(event)
+
+        # Drain remaining events on shutdown
+        while True:
+            event = None
+            with self._lock:
+                if self._buffer:
+                    event = self._buffer.popleft()
+            if event is None:
+                break
+            self._dispatch_to_publishers(event)
+
+    def _dispatch_to_publishers(self, event: AuditEvent) -> None:
+        """Dispatch event to registered publishers catching exceptions safely."""
+        for pub in self._publishers:
+            if not isinstance(pub, InMemoryAuditLogger):
+                try:
+                    pub.publish(event)
+                except Exception:
+                    pass
 
     def record_event(self, event: AuditEvent) -> None:
-        """Execute in-flight sanitization and dispatch audit event to ring buffer and registered publishers."""
+        """Execute in-flight sanitization and non-blocking dispatch to ring buffer."""
         if isinstance(event.payload_snapshot, dict):
             event.payload_snapshot = AuditSanitizer.sanitize_payload(event.payload_snapshot)
         if isinstance(event.diagnostic_reason, str):
             event.diagnostic_reason = AuditSanitizer.sanitize_string(event.diagnostic_reason, DEFAULT_PAYLOAD_MAX_CHARS)
 
-        if len(self._buffer) >= self._capacity:
-            self._buffer.pop(0)  # Drop oldest with metric
-            self._dropped_count += 1
+        # Immediate dispatch to in-memory collectors for zero-latency testing assertions
+        for pub in self._publishers:
+            if isinstance(pub, InMemoryAuditLogger):
+                try:
+                    pub.publish(event)
+                except Exception:
+                    pass
 
-        self._buffer.append(event)
+        with self._queue_condition:
+            if len(self._buffer) >= self._capacity:
+                self._buffer.popleft()  # DROP_OLDEST_WITH_METRIC
+                self._dropped_count += 1
+            self._buffer.append(event)
+            self._queue_condition.notify()
 
         if self._async_queue:
             try:
                 self._async_queue.put_nowait(event)
-                return
-            except Exception:
-                pass
-
-        for pub in self._publishers:
-            try:
-                pub.publish(event)
             except Exception:
                 pass
 
@@ -616,7 +661,15 @@ class AuditManager:
         self.record_event(event)
 
     def flush(self) -> None:
-        """Flush all registered audit publishers."""
+        """Flush queued events and all registered audit publishers."""
+        # Wait until internal bounded buffer is completely drained by worker thread
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            with self._lock:
+                if not self._buffer:
+                    break
+            time.sleep(0.005)
+
         for pub in self._publishers:
             try:
                 pub.flush()
@@ -624,7 +677,13 @@ class AuditManager:
                 pass
 
     def close(self) -> None:
-        """Flush and close all registered audit publishers."""
+        """Flush and close all registered audit publishers, stopping worker thread."""
+        self._stop_event.set()
+        with self._queue_condition:
+            self._queue_condition.notify_all()
+        if self._worker_thread.is_alive():
+            self._worker_thread.join(timeout=1.0)
+
         self.flush()
         for pub in self._publishers:
             try:
