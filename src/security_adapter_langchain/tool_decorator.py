@@ -202,17 +202,20 @@ def secured_tool(
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Extract caller identity from kwargs, config, ContextHolder, or fallback to anonymous
+            caller_config = kwargs.get("config") or kwargs.get("runnable_config")
             caller_identity = kwargs.pop("security_identity", None)
 
-            if caller_identity is None and "config" in kwargs:
-                caller_identity = IdentityBridge.extract_from_config(kwargs.get("config"))
+            if caller_identity is None and caller_config:
+                caller_identity = IdentityBridge.extract_from_config(caller_config)
 
             if caller_identity is None and args and isinstance(args[0], SecurityIdentity):
                 caller_identity = args[0]
                 args = args[1:]
 
             caller_identity = IdentityBridge.resolve_identity(caller_identity)
+
+            if caller_config is None and caller_identity is not None:
+                caller_config = IdentityBridge.create_runnable_config(caller_identity)
 
             # Resolve PDP engine if None
             engine = pdp_engine
@@ -448,7 +451,32 @@ def secured_tool(
             func_kwargs = dict(kwargs)
             func_kwargs.pop("config", None)
             func_kwargs.pop("security_identity", None)
+            func_kwargs.pop("runnable_config", None)
+
+            # Re-inject caller SecurityIdentity and RunnableConfig if target function signature declares them
+            try:
+                sig = inspect.signature(func)
+                if "security_identity" in sig.parameters:
+                    func_kwargs["security_identity"] = caller_identity
+                if "config" in sig.parameters:
+                    func_kwargs["config"] = caller_config
+                elif "runnable_config" in sig.parameters:
+                    func_kwargs["runnable_config"] = caller_config
+            except Exception:
+                pass
+
             return func(*args, **func_kwargs)
+
+        try:
+            import inspect
+            orig_sig = inspect.signature(func)
+            filtered_params = [
+                p for p in orig_sig.parameters.values()
+                if p.name not in HIDDEN_SECURITY_PARAMS
+            ]
+            wrapper.__signature__ = orig_sig.replace(parameters=filtered_params)
+        except Exception:
+            pass
 
         return wrapper
 

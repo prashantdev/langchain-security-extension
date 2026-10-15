@@ -118,6 +118,60 @@ class TestSecuredToolDecorator(unittest.TestCase):
         self.assertEqual(escalation_events[0].payload_snapshot["previous_args"]["dept"], "DEVOPS")
         self.assertEqual(escalation_events[0].payload_snapshot["current_args"]["dept"], "SEC_OPS")
 
+    def test_security_identity_and_config_injection_and_schema_concealment(self):
+        import inspect
+        from security_adapter_langchain.tool_decorator import get_tool_schema
+
+        pdp = EmbeddedPolicyEngine.create()
+        subject = SecurityIdentity.create(
+            subject_id="admin_02",
+            tenant_id="CORP",
+            roles={"ADMIN"},
+            clearance_level=3,
+            department_id="DEVOPS",
+            attributes={},
+        )
+
+        injected_records = {}
+
+        @secured_tool(
+            required_roles=["ADMIN"],
+            min_clearance=2,
+            cel_expression="",
+            is_mutative=False,
+            pdp_engine=pdp,
+        )
+        def inspect_node(
+            node_id: str,
+            security_identity: SecurityIdentity,
+            config: dict,
+        ) -> str:
+            injected_records["security_identity"] = security_identity
+            injected_records["config"] = config
+            return f"Node {node_id} OK"
+
+        run_cfg = {"configurable": {"security_identity": subject, "test_key": "val123"}}
+        res = inspect_node("node-1", config=run_cfg)
+        self.assertEqual(res, "Node node-1 OK")
+        self.assertEqual(injected_records["security_identity"], subject)
+        self.assertEqual(injected_records["config"], run_cfg)
+
+        # Confirm wrapper.__signature__ conceals security_identity and config
+        wrapper_sig = inspect.signature(inspect_node)
+        self.assertIn("node_id", wrapper_sig.parameters)
+        self.assertNotIn("security_identity", wrapper_sig.parameters)
+        self.assertNotIn("config", wrapper_sig.parameters)
+        self.assertNotIn("runnable_config", wrapper_sig.parameters)
+
+        # Confirm get_tool_schema conceals security_identity and config
+        schema = get_tool_schema(inspect_node)
+        self.assertTrue(schema["schema_hiding_verified"])
+        self.assertIn("node_id", schema["parameters"]["properties"])
+        self.assertNotIn("security_identity", schema["parameters"]["properties"])
+        self.assertNotIn("config", schema["parameters"]["properties"])
+        self.assertNotIn("runnable_config", schema["parameters"]["properties"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
