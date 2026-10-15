@@ -105,6 +105,15 @@ DEFAULT_INGESTION_MODE_PARAM: str = INGEST_MODE_STRICT_FAIL_CLOSED
 DEFAULT_CHUNK_DELIMITER: str = "\n\n"
 """Default chunk delimiter when no text splitter is provided."""
 
+DEFAULT_CHUNK_SIZE: int = 1000
+"""Default chunk size for secure text splitting."""
+
+DEFAULT_CHUNK_OVERLAP: int = 200
+"""Default chunk overlap for secure text splitting."""
+
+DEFAULT_TEXT_SEPARATORS: Sequence[str] = ("\n\n", "\n", " ", "")
+"""Default hierarchical separators for secure text splitting."""
+
 HEADER_CLASSIFICATION_PATTERN = re.compile(
     r"#+\s*\[(PUBLIC|INTERNAL|CONFIDENTIAL|RESTRICTED|TOP_SECRET)\]",
     re.MULTILINE | re.IGNORECASE,
@@ -636,6 +645,179 @@ class DocumentSecurityTransformer(BaseDocumentTransformer):
         return SecureDocument.create(page_content=res.page_content, metadata=res.metadata)
 
 
+class SecureTextSplitter(BaseDocumentTransformer):
+    """Stage 2 TextSplitter splitting documents into bounded chunks while propagating security metadata envelopes."""
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        """Initialize SecureTextSplitter.
+
+        Args:
+            *args: Optional positional arguments (chunk_size, chunk_overlap, separators).
+            **kwargs: Optional keyword arguments (chunk_size, chunk_overlap, separators).
+        """
+        chunk_size = kwargs.get("chunk_size", args[0] if len(args) > 0 else DEFAULT_CHUNK_SIZE)
+        chunk_overlap = kwargs.get("chunk_overlap", args[1] if len(args) > 1 else DEFAULT_CHUNK_OVERLAP)
+        separators = kwargs.get("separators", args[2] if len(args) > 2 else DEFAULT_TEXT_SEPARATORS)
+
+        if int(chunk_size) <= 0:
+            raise ValueError("chunk_size must be positive")
+        if int(chunk_overlap) < 0:
+            raise ValueError("chunk_overlap must be non-negative")
+        if int(chunk_overlap) >= int(chunk_size):
+            raise ValueError("chunk_overlap must be smaller than chunk_size")
+
+        self._chunk_size = int(chunk_size)
+        self._chunk_overlap = int(chunk_overlap)
+        self._separators = list(separators)
+
+    @classmethod
+    def create(cls, *args: Any, **kwargs: Any) -> "SecureTextSplitter":
+        """Factory method constructing SecureTextSplitter."""
+        return cls(*args, **kwargs)
+
+    @classmethod
+    def create_default(cls) -> "SecureTextSplitter":
+        """Factory method constructing default SecureTextSplitter."""
+        return cls()
+
+    @property
+    def chunk_size(self) -> int:
+        """Get configured chunk size."""
+        return self._chunk_size
+
+    @property
+    def chunk_overlap(self) -> int:
+        """Get configured chunk overlap."""
+        return self._chunk_overlap
+
+    @property
+    def separators(self) -> List[str]:
+        """Get list of text separators."""
+        return list(self._separators)
+
+    def _merge_splits(self, splits: List[str], separator: str) -> List[str]:
+        docs: List[str] = []
+        current_doc: List[str] = []
+        total = 0
+        sep_len = len(separator) if separator else 0
+
+        for d in splits:
+            _len = len(d)
+            if total + _len + (sep_len if current_doc else 0) > self._chunk_size:
+                if total > 0:
+                    doc = separator.join(current_doc).strip() if separator else "".join(current_doc)
+                    if doc:
+                        docs.append(doc)
+                    while current_doc and (total > self._chunk_overlap or (total + _len + (sep_len if current_doc else 0) > self._chunk_size and total > 0)):
+                        popped = current_doc.pop(0)
+                        total -= len(popped) + (sep_len if current_doc else 0)
+                if _len > self._chunk_size:
+                    start = 0
+                    step = self._chunk_size - self._chunk_overlap if self._chunk_size > self._chunk_overlap else self._chunk_size
+                    while start < _len:
+                        end = min(start + self._chunk_size, _len)
+                        slice_chunk = d[start:end].strip() if separator else d[start:end]
+                        if slice_chunk:
+                            docs.append(slice_chunk)
+                        start += step
+                    current_doc = []
+                    total = 0
+                    continue
+
+            current_doc.append(d)
+            total += _len + (sep_len if len(current_doc) > 1 else 0)
+
+        if current_doc:
+            doc = separator.join(current_doc).strip() if separator else "".join(current_doc)
+            if doc:
+                docs.append(doc)
+
+        return docs
+
+    def _split_text_recursive(self, text: str, separators: Sequence[str]) -> List[str]:
+        if not text:
+            return []
+        chosen_separator: str = ""
+        new_separators: List[str] = []
+        for i, sep in enumerate(separators):
+            if sep == "":
+                chosen_separator = ""
+                break
+            if sep in text:
+                chosen_separator = sep
+                new_separators = list(separators[i + 1:])
+                break
+
+        if chosen_separator == "":
+            splits = list(text)
+        else:
+            splits = text.split(chosen_separator)
+
+        good_splits: List[str] = []
+        for s in splits:
+            if not s and chosen_separator != "":
+                continue
+            if len(s) > self._chunk_size and new_separators:
+                sub_splits = self._split_text_recursive(s, new_separators)
+                good_splits.extend(sub_splits)
+            else:
+                good_splits.append(s)
+
+        return self._merge_splits(good_splits, chosen_separator)
+
+    def split_text(self, text: str) -> List[str]:
+        """Split incoming text into chunks.
+
+        Args:
+            text: Raw input text.
+
+        Returns:
+            List[str]: List of text chunks.
+        """
+        if not text:
+            return []
+        if len(text) <= self._chunk_size:
+            return [text.strip()] if text.strip() else []
+        return self._split_text_recursive(text, self._separators)
+
+    def split_documents(self, documents: Sequence[Any]) -> List[Any]:
+        """Split documents into chunks while propagating metadata envelopes.
+
+        Args:
+            documents: Input sequence of document objects.
+
+        Returns:
+            List[Any]: Chunks with parent metadata propagated.
+        """
+        chunks: List[Any] = []
+        for doc in documents:
+            text = getattr(doc, "page_content", str(doc))
+            metadata = dict(getattr(doc, "metadata", {}))
+            text_splits = self.split_text(text)
+            if not text_splits and text:
+                text_splits = [text]
+            elif not text_splits and text == "":
+                text_splits = [""]
+            for split_chunk in text_splits:
+                chunk_meta = dict(metadata)
+                if isinstance(doc, SecureDocument):
+                    chunks.append(SecureDocument.create(page_content=split_chunk, metadata=chunk_meta))
+                else:
+                    chunks.append(Document(page_content=split_chunk, metadata=chunk_meta))
+        return chunks
+
+    def transform_documents(self, documents: Sequence[Any], **kwargs: Any) -> Sequence[Any]:
+        """Transform documents by splitting them into chunks with metadata propagation.
+
+        Args:
+            documents: Documents to transform.
+
+        Returns:
+            Sequence[Any]: Split document chunks.
+        """
+        return self.split_documents(documents)
+
+
 class SecureDocumentChunkEnricher(BaseDocumentTransformer):
     """Stage 3 Chunk Security Enricher scanning headers, XML tags, inline overrides, and executing SPI enrichers."""
 
@@ -922,8 +1104,54 @@ class SecureVectorStoreIngestor:
             final_docs.append(SecureDocument.create(page_content=doc.page_content, metadata=meta))
         return final_docs
 
+    def _split_documents(self, documents: Sequence[Any]) -> Sequence[Any]:
+        """Stage 2 TextSplitter execution propagating metadata from parent documents to chunks."""
+        if self._text_splitter is None:
+            return documents
+        if hasattr(self._text_splitter, "transform_documents"):
+            return self._text_splitter.transform_documents(documents)
+        if hasattr(self._text_splitter, "split_documents"):
+            return self._text_splitter.split_documents(documents)
+        if hasattr(self._text_splitter, "split_text"):
+            split_docs: List[Any] = []
+            for doc in documents:
+                content = getattr(doc, "page_content", str(doc))
+                meta = dict(getattr(doc, "metadata", {}))
+                chunks = self._text_splitter.split_text(content)
+                if not chunks and content:
+                    chunks = [content]
+                elif not chunks and content == "":
+                    chunks = [""]
+                for chunk in chunks:
+                    chunk_meta = dict(meta)
+                    if isinstance(doc, SecureDocument):
+                        split_docs.append(SecureDocument.create(page_content=chunk, metadata=chunk_meta))
+                    else:
+                        split_docs.append(Document(page_content=chunk, metadata=chunk_meta))
+            return split_docs
+        if callable(self._text_splitter):
+            split_docs = []
+            for doc in documents:
+                content = getattr(doc, "page_content", str(doc))
+                meta = dict(getattr(doc, "metadata", {}))
+                chunks = self._text_splitter(content)
+                if not chunks and content:
+                    chunks = [content]
+                elif not chunks and content == "":
+                    chunks = [""]
+                for chunk in chunks:
+                    chunk_meta = dict(meta)
+                    if isinstance(doc, SecureDocument):
+                        split_docs.append(SecureDocument.create(page_content=chunk, metadata=chunk_meta))
+                    else:
+                        split_docs.append(Document(page_content=chunk, metadata=chunk_meta))
+            return split_docs
+        return documents
+
     def ingest_documents(self, documents: Sequence[Any]) -> List[SecureDocument]:
         """Atomically ingest a batch of documents through the 5-stage security pipeline.
+
+        Document → Stage 1(Transformer) → Stage 2(TextSplitter) → Stage 3(Enricher) → Stage 4(Validator) → Stage 5(VectorStore)
 
         Args:
             documents: Sequence of Document objects or dicts with 'page_content'/'content' and 'metadata'.
@@ -944,8 +1172,12 @@ class SecureVectorStoreIngestor:
                 raw_docs.append(item)
 
         try:
+            # Stage 1: DocumentSecurityTransformer
             stamped_docs = self._transformer.transform_documents(raw_docs)
-            enriched_docs = self._enricher.transform_documents(stamped_docs)
+            # Stage 2: Standard TextSplitter with metadata propagation
+            split_docs = self._split_documents(stamped_docs)
+            # Stage 3: SecureDocumentChunkEnricher
+            enriched_docs = self._enricher.transform_documents(split_docs)
         except Exception as err:
             if self._ingestion_mode == INGEST_MODE_STRICT_FAIL_CLOSED:
                 if self._audit_manager:
@@ -968,6 +1200,7 @@ class SecureVectorStoreIngestor:
                 ) from err
             raise
 
+        # Stage 4: SecurityEnvelopeValidator and Stage 5 return
         return self._validate_and_finalize_batch(enriched_docs, str(uuid.uuid4()))
 
     def ingest_text(
@@ -996,22 +1229,16 @@ class SecureVectorStoreIngestor:
 
         base_meta = dict(metadata) if metadata is not None else {}
         base_meta["source"] = source_name
-
-        if self._text_splitter is not None:
-            if hasattr(self._text_splitter, "split_text"):
-                raw_chunks = self._text_splitter.split_text(text)
-            elif callable(self._text_splitter):
-                raw_chunks = self._text_splitter(text)
-            else:
-                raw_chunks = [chunk.strip() for chunk in text.split(chunk_delimiter) if chunk.strip()]
-        else:
-            raw_chunks = [chunk.strip() for chunk in text.split(chunk_delimiter) if chunk.strip()]
-
         doc_id = base_meta.get(SEC_DOCUMENT_ID, str(uuid.uuid4()))
         base_meta[SEC_DOCUMENT_ID] = doc_id
 
+        if self._text_splitter is not None:
+            raw_docs = [Document(page_content=text, metadata=dict(base_meta))]
+            return self.ingest_documents(raw_docs)
+
+        raw_chunks = [chunk.strip() for chunk in text.split(chunk_delimiter) if chunk.strip()]
+        if not raw_chunks and text:
+            raw_chunks = [text]
         raw_docs = [Document(page_content=chunk, metadata=dict(base_meta)) for chunk in raw_chunks]
-        stamped_docs = self._transformer.transform_documents(raw_docs)
-        enriched_docs = self._enricher.transform_documents(stamped_docs)
-        return self._validate_and_finalize_batch(enriched_docs, str(doc_id))
+        return self.ingest_documents(raw_docs)
 
