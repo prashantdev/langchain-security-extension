@@ -34,10 +34,15 @@ from security_core.constants import (
 )
 from security_core.audit import AuditEvent
 
+from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.callbacks.manager import CallbackManagerForRetrieverRun
+from pydantic import ConfigDict
+
 DEFAULT_TOP_K_CANDIDATES: int = 3
 
 
-class SecureDocument:
+class SecureDocument(Document):
     """Document container representation for chunk metadata evaluation.
 
     Attributes:
@@ -45,28 +50,32 @@ class SecureDocument:
         metadata (Dict[str, Any]): Security envelope metadata dictionary.
     """
 
-    def __init__(self, page_content: str, metadata: Dict[str, Any]):
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+    score: Optional[float] = None
+
+    def __init__(self, page_content: str, metadata: Optional[Dict[str, Any]] = None, **kwargs: Any):
         """Initialize SecureDocument.
 
         Args:
             page_content: Chunk page text content.
             metadata: Metadata envelope mapping.
+            **kwargs: Additional keyword arguments.
         """
-        self.page_content = page_content
-        self.metadata = dict(metadata)
+        super().__init__(page_content=page_content, metadata=dict(metadata or {}), **kwargs)
 
     @classmethod
-    def create(cls, page_content: str, metadata: Dict[str, Any]):
+    def create(cls, page_content: str, metadata: Dict[str, Any], **kwargs: Any):
         """Factory method to construct SecureDocument.
 
         Args:
             page_content: Chunk text string.
             metadata: Metadata mapping.
+            **kwargs: Additional keyword arguments.
 
         Returns:
             SecureDocument: Constructed document instance.
         """
-        return cls(page_content=page_content, metadata=metadata)
+        return cls(page_content=page_content, metadata=metadata, **kwargs)
 
 
 class PrefilterAST(dict):
@@ -128,13 +137,24 @@ def _sanitize_chroma_filter(filter_dict: Optional[Dict[str, Any]]) -> Optional[D
     return dict(filter_dict)
 
 
-class SecureRetriever:
+class SecureRetriever(BaseRetriever):
     """Wraps document retriever components with dynamic pre-filtering, oversampling, and post-pruning PEP.
 
     Attributes:
         base_retriever (Any): Underlying vector retriever or search callable.
         pdp_engine (PolicyDecisionEngine): PDP decision engine instance.
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    _base_retriever: Any = None
+    _pdp_engine: Any = None
+    _oversampling_factor: float = DEFAULT_OVERSAMPLING_FACTOR
+    _secret_key: Optional[str] = None
+    _store_profile: str = STORE_PROFILE_FULL_AST
+    _secondary_fetch_fn: Any = None
+    _similarity_cutoff: float = DEFAULT_SIMILARITY_CUTOFF
+    _active_config: Any = None
 
     def __init__(
         self,
@@ -151,6 +171,7 @@ class SecureRetriever:
             *args: Optional positional arguments (oversampling_factor, secret_key, store_profile, secondary_fetch_fn, similarity_cutoff).
             **kwargs: Optional keyword arguments.
         """
+        super().__init__()
         oversampling_factor = kwargs.get("oversampling_factor", args[0] if len(args) > 0 else DEFAULT_OVERSAMPLING_FACTOR)
         secret_key = kwargs.get("secret_key", args[1] if len(args) > 1 else None)
         store_profile = kwargs.get("store_profile", args[2] if len(args) > 2 else STORE_PROFILE_FULL_AST)
@@ -164,6 +185,7 @@ class SecureRetriever:
         self._store_profile = str(store_profile)
         self._secondary_fetch_fn = secondary_fetch_fn
         self._similarity_cutoff = float(similarity_cutoff)
+        self._active_config = None
 
     @classmethod
     def wrap(
@@ -508,10 +530,83 @@ class SecureRetriever:
 
         return permitted_candidates[:top_k]
 
+    def invoke(
+        self,
+        input: str,
+        config: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> List[SecureDocument]:
+        """Invoke the retriever synchronously capturing RunnableConfig for identity extraction and AST filtering."""
+        self._active_config = config
+        try:
+            return super().invoke(input, config=config, **kwargs)
+        finally:
+            self._active_config = None
+
+    def _get_relevant_documents(
+        self,
+        query: str,
+        *,
+        run_manager: Optional[CallbackManagerForRetrieverRun] = None,
+        **kwargs: Any,
+    ) -> List[SecureDocument]:
+        """Retrieve relevant documents applying security AST filtering, oversampling, and post-pruning.
+
+        1. Extract SecurityIdentity from run_manager.config / RunnableConfig.
+        2. Generate AST filter dictionary according to store capability profile.
+        3. Delegate fetch to self.base_retriever.get_relevant_documents(...) with search_kwargs={"filter": ast_filter}.
+        4. Execute post-retrieval pruning and adaptive secondary paging.
+        """
+        run_config = getattr(run_manager, "config", None) or self._active_config
+        identity = IdentityBridge.extract_from_config(run_config)
+        resolved_identity = IdentityBridge.resolve_identity(identity)
+
+        ast_filter = self.build_prefilter_ast(resolved_identity, config=run_config)
+
+        top_k = int(kwargs.get("top_k", DEFAULT_TOP_K_CANDIDATES))
+        raw_k_fetch = int(top_k * self._oversampling_factor)
+        k_fetch = min(max(raw_k_fetch, top_k), DEFAULT_MAX_FETCH_CAP)
+        if isinstance(run_config, dict) and isinstance(run_config.get("configurable"), dict):
+            run_config["configurable"]["sec:oversampled_fetch_k"] = k_fetch
+
+        candidates: List[Any] = []
+        if hasattr(self._base_retriever, "get_relevant_documents"):
+            candidates = self._base_retriever.get_relevant_documents(
+                query,
+                search_kwargs={"filter": ast_filter, "k": k_fetch},
+            )
+        elif hasattr(self._base_retriever, "invoke"):
+            candidates = self._base_retriever.invoke(
+                query,
+                search_kwargs={"filter": ast_filter, "k": k_fetch},
+            )
+        elif hasattr(self._base_retriever, "query"):
+            where_arg = _sanitize_chroma_filter(dict(ast_filter)) if ast_filter else None
+            query_kwargs: Dict[str, Any] = {"n_results": k_fetch}
+            if where_arg:
+                query_kwargs["where"] = where_arg
+            raw_res = self._base_retriever.query(query_texts=[query], **query_kwargs)
+            docs = raw_res.get("documents", [[]])[0]
+            metas = raw_res.get("metadatas", [[]])[0]
+            ids = raw_res.get("ids", [[]])[0]
+            for doc_id, doc_text, meta in zip(ids, docs, metas):
+                clean_meta = dict(meta or {})
+                roles_val = clean_meta.get(SEC_ALLOWED_ROLES)
+                if isinstance(roles_val, str) and roles_val:
+                    clean_meta[SEC_ALLOWED_ROLES] = [r.strip() for r in roles_val.split(",") if r.strip()]
+                req_roles = clean_meta.get(SEC_REQUIRED_ROLES)
+                if isinstance(req_roles, str) and req_roles:
+                    clean_meta[SEC_REQUIRED_ROLES] = [r.strip() for r in req_roles.split(",") if r.strip()]
+                candidates.append(SecureDocument.create(page_content=doc_text, metadata=clean_meta))
+        elif callable(self._base_retriever):
+            candidates = self._base_retriever(query, ast_filter, k_fetch)
+
+        return self.prune_candidates(candidates, resolved_identity, top_k, config=run_config)
+
     def get_relevant_documents(
         self,
         query: str,
-        identity: Optional[SecurityIdentity],
+        identity: Optional[SecurityIdentity] = None,
         *args: Any,
         **kwargs: Any,
     ) -> List[SecureDocument]:
@@ -550,7 +645,7 @@ class SecureRetriever:
     def search(
         self,
         query: str,
-        identity: Optional[SecurityIdentity],
+        identity: Optional[SecurityIdentity] = None,
         *args: Any,
         **kwargs: Any,
     ) -> List[Any]:
@@ -601,5 +696,6 @@ class SecureRetriever:
             candidates = self._base_retriever(query, push_down_filter, k_fetch)
 
         return self.prune_candidates(candidates, resolved_identity, top_k, config=config)
+
 
 

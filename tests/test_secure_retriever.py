@@ -126,6 +126,43 @@ class TestSecureRetriever(unittest.TestCase):
         self.assertEqual(result[0].page_content, "c1")
         self.assertEqual(result[1].page_content, "c3")
 
+    def test_base_retriever_inheritance_and_invoke_delegation(self):
+        from langchain_core.retrievers import BaseRetriever
+        from security_core.identity import IdentityBridge
+
+        pdp = EmbeddedPolicyEngine.create()
+        identity = SecurityIdentity.create("retriever_user", "CORP_X", {"ANALYST"}, 2, "FINANCE", {})
+        run_config = IdentityBridge.create_runnable_config(identity)
+
+        class MockVectorRetriever:
+            def __init__(self):
+                self.invoked = False
+                self.received_kwargs = None
+
+            def get_relevant_documents(self, query: str, search_kwargs=None):
+                self.invoked = True
+                self.received_kwargs = search_kwargs
+                return [
+                    SecureDocument.create("Authorized Chunk", {"sec:tenant_id": "CORP_X", "sec:clearance_floor": 1, "sec:allowed_roles": ["ANALYST"]}),
+                    SecureDocument.create("Unauthorized Chunk", {"sec:tenant_id": "CORP_X", "sec:clearance_floor": 4, "sec:allowed_roles": ["ANALYST"]}),
+                ]
+
+        base_retriever = MockVectorRetriever()
+        retriever = SecureRetriever.wrap(base_retriever=base_retriever, pdp_engine=pdp)
+
+        self.assertIsInstance(retriever, BaseRetriever)
+        self.assertTrue(hasattr(retriever, "_get_relevant_documents"))
+
+        results = retriever.invoke("test query", config=run_config)
+        self.assertTrue(base_retriever.invoked)
+        self.assertIsNotNone(base_retriever.received_kwargs)
+        self.assertIn("filter", base_retriever.received_kwargs)
+        self.assertEqual(base_retriever.received_kwargs["filter"]["sec:tenant_id"], "CORP_X")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].page_content, "Authorized Chunk")
+
 
 if __name__ == "__main__":
     unittest.main()
+

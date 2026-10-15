@@ -6,13 +6,14 @@ to perform PDP authorization evaluations as specified in Spec 0 and Spec 2.
 """
 
 from typing import Dict, Any, List, Optional
+from langchain_core.callbacks import BaseCallbackHandler
 from security_core.identity import SecurityIdentity
 from security_core.pdp import PolicyDecisionEngine, PolicyEvaluationRequest
 from security_core.constants import ACTION_AGENT_INVOKE, ACTION_TOOL_EXECUTE
 from security_core.exceptions import SecurityAuthorizationError, ToolExecutionDeniedError
 
 
-class SecureCallbackHandler:
+class SecureCallbackHandler(BaseCallbackHandler):
     """LangChain callback handler performing pre-execution PEP evaluations.
 
     Attributes:
