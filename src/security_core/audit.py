@@ -23,7 +23,18 @@ from security_core.constants import (
     SEVERITY_WARNING,
     SEVERITY_SECURITY_ALERT,
     SEVERITY_CRITICAL_ALERT,
+    DEFAULT_SENSITIVE_FIELD_NAMES,
 )
+from security_core.pii import (
+    PiiContext,
+    PiiSanitizerSPI,
+    BuiltInPiiSanitizer,
+    get_pii_sanitizer,
+    get_pii_scope,
+    PII_STAGE_AUDIT_PAYLOAD,
+    PII_SCOPE_DISABLED,
+)
+
 
 
 class AuditEvent:
@@ -220,102 +231,53 @@ class AuditEvent:
         }
 
 
-SENSITIVE_FIELD_NAMES = {
-    "password",
-    "secret",
-    "token",
-    "apikey",
-    "api_key",
-    "aws_key",
-    "bearer_token",
-    "authorization",
-    "credential",
-    "private_key",
-    "ssn",
-    "credit_card",
-}
+SENSITIVE_FIELD_NAMES = set(DEFAULT_SENSITIVE_FIELD_NAMES)
 
 
 class AuditSanitizer:
-    """3-stage in-flight PII and secret scrubber pipeline (Annotation Masking, Regex Scrubbing, Size Truncation)."""
+    """3-stage in-flight PII and secret scrubber pipeline delegating to active PiiSanitizerSPI."""
 
-    _REGISTERED_MASKED_FIELDS = set(SENSITIVE_FIELD_NAMES)
-
-    SECRET_REGEX = re.compile(
-        r'(bearer[\s=]+[^\s,\'"]+|password\s*[:=]\s*[^\s,\'"]+|secret\s*[:=]\s*[^\s,\'"]+|token\s*[:=]\s*[^\s,\'"]+|api[_\-]?key\s*[:=]\s*[^\s,\'"]+|aws[_\-]?key\s*[:=]\s*[^\s,\'"]+|AKIA[0-9A-Z]{16}|eyJ[a-zA-Z0-9_\-]{5,}\.eyJ[a-zA-Z0-9_\-]{5,}\.[a-zA-Z0-9_\-]{5,}|(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^:\s]+:[^@\s]+@[^\s,\'"]+|\b\d{3}-\d{2}-\d{4}\b)',
-        re.IGNORECASE,
-    )
-    """Regular expression matcher for credentials, tokens, API keys, JWTs, DB URIs, and SSN PII."""
+    SECRET_REGEX = BuiltInPiiSanitizer.COMBINED_SECRET_REGEX
 
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> "AuditSanitizer":
         """Construct an AuditSanitizer and register any provided masked_fields."""
+        sanitizer = get_pii_sanitizer()
         masked_fields = kwargs.get("masked_fields", args[0] if len(args) > 0 else None)
-        if masked_fields:
+        if masked_fields and hasattr(sanitizer, "register_masked_field"):
             for field_name in masked_fields:
-                cls.register_masked_field(str(field_name))
+                sanitizer.register_masked_field(str(field_name))
         return cls()
 
     @classmethod
     def register_masked_field(cls, field_name: str) -> None:
         """Stage 1: Register a parameter or field name for automatic @Masked annotation redaction."""
-        if field_name:
-            cls._REGISTERED_MASKED_FIELDS.add(field_name.lower().strip())
+        sanitizer = get_pii_sanitizer()
+        if hasattr(sanitizer, "register_masked_field"):
+            sanitizer.register_masked_field(field_name)
 
     @classmethod
     def is_masked_field(cls, field_name: str) -> bool:
         """Check if a field name is marked as sensitive/masked."""
-        return bool(field_name and field_name.lower().strip() in cls._REGISTERED_MASKED_FIELDS)
-
-    @classmethod
-    def _redact_match(cls, match: Any) -> str:
-        text = match.group(0)
-        if "://" in text and "@" in text:
-            scheme_user = text.split(":", 2)
-            at_part = text.split("@", 1)[1]
-            return f"{scheme_user[0]}:{scheme_user[1]}:[REDACTED]@{at_part}"
-        if "=" in text:
-            prefix = text.split("=")[0]
-            return f"{prefix}=[REDACTED]"
-        elif ":" in text:
-            prefix = text.split(":")[0]
-            return f"{prefix}: [REDACTED]"
-        elif text.lower().startswith("bearer "):
-            return "bearer [REDACTED]"
-        return "[REDACTED]"
+        sanitizer = get_pii_sanitizer()
+        if hasattr(sanitizer, "is_masked_field"):
+            return sanitizer.is_masked_field(field_name)
+        return False
 
     @classmethod
     def sanitize_string(cls, value: str, max_chars: int) -> str:
         """Apply Stage 2 regex scrubbing and Stage 3 truncation to a string value."""
-        cleaned = cls.SECRET_REGEX.sub(cls._redact_match, value)
-        if len(cleaned) > max_chars:
-            cleaned = cleaned[:max_chars] + "...[TRUNCATED]"
-        return cleaned
+        sanitizer = get_pii_sanitizer()
+        context = PiiContext.create(PII_STAGE_AUDIT_PAYLOAD, None, None, None, None)
+        return sanitizer.sanitize_text(value, context, max_chars)
 
     @classmethod
     def sanitize_payload(cls, payload: Dict[str, Any], *args: Any, **kwargs: Any) -> Dict[str, Any]:
         """Scrub secrets, PII, @Masked fields, and truncate oversized strings from payload dictionary."""
-        max_chars = int(kwargs.get("max_chars", args[0] if len(args) > 0 else DEFAULT_PAYLOAD_MAX_CHARS))
-        masked_fields = set(kwargs.get("masked_fields", ()))
-        masked_lower = {f.lower() for f in masked_fields} | cls._REGISTERED_MASKED_FIELDS
+        sanitizer = get_pii_sanitizer()
+        context = PiiContext.create(PII_STAGE_AUDIT_PAYLOAD, None, None, None, None)
+        return sanitizer.sanitize_payload(payload, context, *args, **kwargs)
 
-        sanitized: Dict[str, Any] = {}
-        for k, v in payload.items():
-            if str(k).lower() in masked_lower:
-                sanitized[k] = "[REDACTED]"
-            elif isinstance(v, str):
-                sanitized[k] = cls.sanitize_string(v, max_chars)
-            elif isinstance(v, dict):
-                sanitized[k] = cls.sanitize_payload(v, max_chars=max_chars, masked_fields=masked_fields)
-            elif isinstance(v, list):
-                sanitized[k] = [
-                    cls.sanitize_payload(item, max_chars=max_chars, masked_fields=masked_fields) if isinstance(item, dict)
-                    else (cls.sanitize_string(item, max_chars) if isinstance(item, str) else item)
-                    for item in v
-                ]
-            else:
-                sanitized[k] = v
-        return sanitized
 
 
 class AuditPublisherSPI(ABC):
@@ -626,10 +588,20 @@ class AuditManager:
 
     def record_event(self, event: AuditEvent) -> None:
         """Execute in-flight sanitization and non-blocking dispatch to ring buffer."""
-        if isinstance(event.payload_snapshot, dict):
-            event.payload_snapshot = AuditSanitizer.sanitize_payload(event.payload_snapshot)
-        if isinstance(event.diagnostic_reason, str):
-            event.diagnostic_reason = AuditSanitizer.sanitize_string(event.diagnostic_reason, DEFAULT_PAYLOAD_MAX_CHARS)
+        if get_pii_scope() != PII_SCOPE_DISABLED:
+            ctx = PiiContext.create(
+                PII_STAGE_AUDIT_PAYLOAD,
+                event.tenant_id,
+                event.subject_id,
+                event.target_resource,
+                {"action": event.action, "enforcement_point": event.enforcement_point},
+            )
+            sanitizer = get_pii_sanitizer()
+            if isinstance(event.payload_snapshot, dict):
+                event.payload_snapshot = sanitizer.sanitize_payload(event.payload_snapshot, ctx)
+            if isinstance(event.diagnostic_reason, str):
+                event.diagnostic_reason = sanitizer.sanitize_text(event.diagnostic_reason, ctx, DEFAULT_PAYLOAD_MAX_CHARS)
+
 
         # Immediate dispatch to in-memory collectors for zero-latency testing assertions
         for pub in self._publishers:

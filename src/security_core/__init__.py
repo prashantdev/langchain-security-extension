@@ -48,6 +48,18 @@ from security_core.constants import (
     STRATEGY_HARD_ABORT,
     STRATEGY_RETURN_FEEDBACK,
 )
+from security_core.pii import (
+    PiiSanitizerSPI,
+    BuiltInPiiSanitizer,
+    PiiContext,
+    get_pii_sanitizer,
+    set_pii_sanitizer,
+    reset_pii_sanitizer,
+    get_pii_scope,
+    set_pii_scope,
+    reset_pii_scope,
+    is_valid_luhn,
+)
 
 __all__ = [
     "SecurityIdentity",
@@ -81,5 +93,16 @@ __all__ = [
     "ACTION_CHUNK_RETRIEVE",
     "STRATEGY_HARD_ABORT",
     "STRATEGY_RETURN_FEEDBACK",
+    "PiiSanitizerSPI",
+    "BuiltInPiiSanitizer",
+    "PiiContext",
+    "get_pii_sanitizer",
+    "set_pii_sanitizer",
+    "reset_pii_sanitizer",
+    "get_pii_scope",
+    "set_pii_scope",
+    "reset_pii_scope",
+    "is_valid_luhn",
 ]
+
 

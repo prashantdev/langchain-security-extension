@@ -17,9 +17,14 @@ from security_core.constants import (
     SEVERITY_WARNING,
     CONFIG_KEY_SECURITY_IDENTITY,
     CONFIG_KEY_INVOCATION_PARAMS,
+    PII_SCOPE_FULL_IN_FLIGHT,
+    PII_STAGE_INBOUND_PROMPT,
+    PII_STAGE_OUTBOUND_RESPONSE,
 )
 from security_core.exceptions import AgentAccessDeniedException, SecurityAuthorizationError
 from security_adapter_langchain.callback_handler import SecureCallbackHandler
+from security_core.pii import get_pii_sanitizer, get_pii_scope, PiiContext
+
 
 
 class SecureRunnable:
@@ -225,6 +230,43 @@ class SecureRunnable:
             )
         return identity
 
+    def _sanitize_inbound_input(self, input_data: Any, identity: SecurityIdentity) -> Any:
+        """Sanitize inbound input payload if FULL_IN_FLIGHT PII redaction scope is enabled."""
+        if get_pii_scope() == PII_SCOPE_FULL_IN_FLIGHT:
+            sanitizer = get_pii_sanitizer()
+            ctx = PiiContext.create(PII_STAGE_INBOUND_PROMPT, identity.tenant_id, identity.subject_id, self._agent_name, None)
+            if isinstance(input_data, str):
+                return sanitizer.sanitize_text(input_data, ctx)
+            elif isinstance(input_data, dict):
+                return sanitizer.sanitize_payload(input_data, ctx)
+            elif isinstance(input_data, list):
+                return [
+                    sanitizer.sanitize_payload(item, ctx) if isinstance(item, dict)
+                    else (sanitizer.sanitize_text(item, ctx) if isinstance(item, str) else item)
+                    for item in input_data
+                ]
+        return input_data
+
+    def _sanitize_outbound_output(self, result: Any, identity: SecurityIdentity) -> Any:
+        """Sanitize outbound response payload if FULL_IN_FLIGHT PII redaction scope is enabled."""
+        if get_pii_scope() == PII_SCOPE_FULL_IN_FLIGHT:
+            sanitizer = get_pii_sanitizer()
+            ctx = PiiContext.create(PII_STAGE_OUTBOUND_RESPONSE, identity.tenant_id, identity.subject_id, self._agent_name, None)
+            if isinstance(result, str):
+                return sanitizer.sanitize_text(result, ctx)
+            elif isinstance(result, dict):
+                return sanitizer.sanitize_payload(result, ctx)
+            elif isinstance(result, list):
+                return [
+                    sanitizer.sanitize_payload(item, ctx) if isinstance(item, dict)
+                    else (sanitizer.sanitize_text(item, ctx) if isinstance(item, str) else item)
+                    for item in result
+                ]
+            elif hasattr(result, "content") and isinstance(result.content, str):
+                result.content = sanitizer.sanitize_text(result.content, ctx)
+                return result
+        return result
+
     def invoke(self, input_data: Any, *args: Any, **kwargs: Any) -> Any:
         """Synchronously invoke protected Runnable with security context binding and LCEL violation boundary.
 
@@ -242,6 +284,7 @@ class SecureRunnable:
         config: Optional[Dict[str, Any]] = kwargs.get("config", args[0] if len(args) > 0 else None)
         identity = self._evaluate_entry_access(config)
         token = SecurityContextHolder.set_identity(identity)
+        input_data = self._sanitize_inbound_input(input_data, identity)
         if isinstance(config, dict) and isinstance(config.get("configurable"), dict) and self._violation_handler is not None:
             config["configurable"]["sec:violation_handler"] = self._violation_handler
             config["configurable"].setdefault("sec:actions", [])
@@ -261,6 +304,8 @@ class SecureRunnable:
                     result = self._runnable(input_data)
             else:
                 raise ValueError("Wrapped object is neither Runnable nor callable.")
+
+            result = self._sanitize_outbound_output(result, identity)
 
             if (
                 self._violation_fallback is not None
@@ -285,6 +330,7 @@ class SecureRunnable:
         finally:
             SecurityContextHolder.reset_identity(token)
 
+
     async def ainvoke(self, input_data: Any, *args: Any, **kwargs: Any) -> Any:
         """Asynchronously invoke protected Runnable with async context binding.
 
@@ -302,6 +348,7 @@ class SecureRunnable:
         config: Optional[Dict[str, Any]] = kwargs.get("config", args[0] if len(args) > 0 else None)
         identity = self._evaluate_entry_access(config)
         token = SecurityContextHolder.set_identity(identity)
+        input_data = self._sanitize_inbound_input(input_data, identity)
         if isinstance(config, dict) and isinstance(config.get("configurable"), dict) and self._violation_handler is not None:
             config["configurable"]["sec:violation_handler"] = self._violation_handler
             config["configurable"].setdefault("sec:actions", [])
@@ -329,6 +376,8 @@ class SecureRunnable:
                         result = self._runnable(input_data)
             else:
                 raise ValueError("Wrapped object is neither Runnable nor callable.")
+
+            result = self._sanitize_outbound_output(result, identity)
 
             if (
                 self._violation_fallback is not None
@@ -358,12 +407,15 @@ class SecureRunnable:
         config: Optional[Dict[str, Any]] = kwargs.get("config", args[0] if len(args) > 0 else None)
         identity = self._evaluate_entry_access(config)
         token = SecurityContextHolder.set_identity(identity)
+        input_data = self._sanitize_inbound_input(input_data, identity)
         try:
             if hasattr(self._runnable, "stream"):
                 if config is not None:
-                    yield from self._runnable.stream(input_data, config)
+                    for chunk in self._runnable.stream(input_data, config):
+                        yield self._sanitize_outbound_output(chunk, identity)
                 else:
-                    yield from self._runnable.stream(input_data)
+                    for chunk in self._runnable.stream(input_data):
+                        yield self._sanitize_outbound_output(chunk, identity)
             else:
                 yield self.invoke(input_data, config)
         finally:
@@ -374,18 +426,20 @@ class SecureRunnable:
         config: Optional[Dict[str, Any]] = kwargs.get("config", args[0] if len(args) > 0 else None)
         identity = self._evaluate_entry_access(config)
         token = SecurityContextHolder.set_identity(identity)
+        input_data = self._sanitize_inbound_input(input_data, identity)
         try:
             if hasattr(self._runnable, "astream"):
                 if config is not None:
                     async for chunk in self._runnable.astream(input_data, config):
-                        yield chunk
+                        yield self._sanitize_outbound_output(chunk, identity)
                 else:
                     async for chunk in self._runnable.astream(input_data):
-                        yield chunk
+                        yield self._sanitize_outbound_output(chunk, identity)
             else:
                 yield await self.ainvoke(input_data, config)
         finally:
             SecurityContextHolder.reset_identity(token)
+
 
     def batch(self, inputs: List[Any], *args: Any, **kwargs: Any) -> List[Any]:
         """Batch invoke protected Runnable across a list of input payloads."""

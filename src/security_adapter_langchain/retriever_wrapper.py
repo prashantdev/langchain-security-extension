@@ -31,8 +31,12 @@ from security_core.constants import (
     SEC_DEPARTMENT_ID,
     SEC_ENVELOPE_HASH,
     SEC_QUARANTINED,
+    PII_SCOPE_FULL_IN_FLIGHT,
+    PII_STAGE_RETRIEVAL_DOCUMENT,
 )
 from security_core.audit import AuditEvent
+from security_core.pii import get_pii_sanitizer, get_pii_scope, PiiContext
+
 
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
@@ -528,7 +532,21 @@ class SecureRetriever(BaseRetriever):
                 reason_code=EVENT_RAG_RESULT_STARVATION,
             ))
 
-        return permitted_candidates[:top_k]
+        final_candidates = permitted_candidates[:top_k]
+        if get_pii_scope() == PII_SCOPE_FULL_IN_FLIGHT:
+            sanitizer = get_pii_sanitizer()
+            ctx = PiiContext.create(
+                PII_STAGE_RETRIEVAL_DOCUMENT,
+                resolved_identity.tenant_id,
+                resolved_identity.subject_id,
+                "vector_retriever",
+                {"requested_k": top_k, "returned_count": len(final_candidates)},
+            )
+            for doc in final_candidates:
+                if hasattr(doc, "page_content") and isinstance(doc.page_content, str):
+                    doc.page_content = sanitizer.sanitize_text(doc.page_content, ctx)
+
+        return final_candidates
 
     def invoke(
         self,

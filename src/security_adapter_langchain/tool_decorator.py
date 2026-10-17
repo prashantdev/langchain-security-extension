@@ -13,10 +13,14 @@ from security_core.constants import (
     ACTION_TOOL_EXECUTE,
     STRATEGY_HARD_ABORT,
     STRATEGY_RETURN_FEEDBACK,
+    HIDDEN_SECURITY_PARAMS,
+    PII_SCOPE_FULL_IN_FLIGHT,
+    PII_STAGE_TOOL_ARGUMENT,
+    PII_STAGE_TOOL_OUTPUT,
 )
 from security_core.exceptions import ToolExecutionDeniedError, ToolExecutionFeedbackException
+from security_core.pii import get_pii_sanitizer, get_pii_scope, PiiContext
 
-from security_core.constants import HIDDEN_SECURITY_PARAMS
 
 
 def get_tool_schema(tool: Any) -> Dict[str, Any]:
@@ -465,7 +469,40 @@ def secured_tool(
             except Exception:
                 pass
 
-            return func(*args, **func_kwargs)
+            if get_pii_scope() == PII_SCOPE_FULL_IN_FLIGHT:
+                sanitizer = get_pii_sanitizer()
+                ctx_in = PiiContext.create(
+                    PII_STAGE_TOOL_ARGUMENT,
+                    caller_identity.tenant_id,
+                    caller_identity.subject_id,
+                    tool_name,
+                    {"required_roles": required_roles, "min_clearance": min_clearance},
+                )
+                func_kwargs = sanitizer.sanitize_payload(func_kwargs, ctx_in)
+
+            result = func(*args, **func_kwargs)
+
+            if get_pii_scope() == PII_SCOPE_FULL_IN_FLIGHT:
+                sanitizer = get_pii_sanitizer()
+                ctx_out = PiiContext.create(
+                    PII_STAGE_TOOL_OUTPUT,
+                    caller_identity.tenant_id,
+                    caller_identity.subject_id,
+                    tool_name,
+                    {"required_roles": required_roles, "min_clearance": min_clearance},
+                )
+                if isinstance(result, str):
+                    result = sanitizer.sanitize_text(result, ctx_out)
+                elif isinstance(result, dict):
+                    result = sanitizer.sanitize_payload(result, ctx_out)
+                elif isinstance(result, list):
+                    result = [
+                        sanitizer.sanitize_payload(item, ctx_out) if isinstance(item, dict)
+                        else (sanitizer.sanitize_text(item, ctx_out) if isinstance(item, str) else item)
+                        for item in result
+                    ]
+
+            return result
 
         try:
             import inspect
