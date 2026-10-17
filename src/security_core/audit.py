@@ -283,6 +283,11 @@ class AuditSanitizer:
 class AuditPublisherSPI(ABC):
     """SPI interface for enterprise SIEM and audit publishers."""
 
+    @property
+    def is_immediate(self) -> bool:
+        """Indicate whether events should be dispatched immediately to this publisher."""
+        return False
+
     @abstractmethod
     def publish(self, event: AuditEvent) -> None:
         """Publish a single AuditEvent.
@@ -321,42 +326,6 @@ class ConsoleAuditLogger(AuditPublisherSPI):
         """
         print(f"[AUDIT LOG] [{event.severity}] {event.action} by {event.subject_id} -> {event.decision} ({event.diagnostic_reason})")
 
-
-class InMemoryAuditLogger(AuditPublisherSPI):
-    """In-memory collector for audit events, ideal for testing."""
-
-    def __init__(self):
-        """Initialize InMemoryAuditLogger."""
-        self._events: List[AuditEvent] = []
-
-    @classmethod
-    def create(cls):
-        """Factory method to construct InMemoryAuditLogger.
-
-        Returns:
-            InMemoryAuditLogger: New instance.
-        """
-        return cls()
-
-    def publish(self, event: AuditEvent) -> None:
-        """Append event to internal memory list.
-
-        Args:
-            event: AuditEvent instance.
-        """
-        self._events.append(event)
-
-    def get_events(self) -> List[AuditEvent]:
-        """Get copy of captured audit events.
-
-        Returns:
-            List[AuditEvent]: Copy of captured event list.
-        """
-        return list(self._events)
-
-    def clear(self) -> None:
-        """Clear captured audit events list."""
-        self._events.clear()
 
 
 class PythonLoggingAuditPublisher(AuditPublisherSPI):
@@ -580,7 +549,7 @@ class AuditManager:
     def _dispatch_to_publishers(self, event: AuditEvent) -> None:
         """Dispatch event to registered publishers catching exceptions safely."""
         for pub in self._publishers:
-            if not isinstance(pub, InMemoryAuditLogger):
+            if not getattr(pub, "is_immediate", False):
                 try:
                     pub.publish(event)
                 except Exception:
@@ -602,10 +571,9 @@ class AuditManager:
             if isinstance(event.diagnostic_reason, str):
                 event.diagnostic_reason = sanitizer.sanitize_text(event.diagnostic_reason, ctx, DEFAULT_PAYLOAD_MAX_CHARS)
 
-
-        # Immediate dispatch to in-memory collectors for zero-latency testing assertions
+        # Immediate dispatch for synchronous publishers (e.g. test collectors)
         for pub in self._publishers:
-            if isinstance(pub, InMemoryAuditLogger):
+            if getattr(pub, "is_immediate", False):
                 try:
                     pub.publish(event)
                 except Exception:

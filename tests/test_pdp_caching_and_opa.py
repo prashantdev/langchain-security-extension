@@ -37,6 +37,48 @@ class TestPDPCachingAndOPA(unittest.TestCase):
         self.assertEqual(decision.decision, DECISION_DENY)
         self.assertEqual(decision.decision_enum, DecisionEnum.DENY)
 
+    def test_rule_constraints_roles_clearance_and_cel(self):
+        engine = EmbeddedPolicyEngine.create()
+        # Rule that denies only if role is CONTRACTOR and clearance < 3
+        rule_constrained_deny = PolicyRule.from_dict({
+            "rule_id": "rule_contractor_deny",
+            "target_action": ACTION_TOOL_EXECUTE,
+            "effect": DECISION_DENY,
+            "required_roles": ["CONTRACTOR"],
+            "min_clearance": 3,
+            "on_denial": STRATEGY_HARD_ABORT,
+        })
+        rule_permit = PolicyRule.from_dict({
+            "rule_id": "rule_default_permit",
+            "target_action": ACTION_TOOL_EXECUTE,
+            "effect": DECISION_PERMIT,
+            "on_denial": STRATEGY_HARD_ABORT,
+        })
+        engine.add_rule(rule_constrained_deny)
+        engine.add_rule(rule_permit)
+
+        # Subject has role USER (not CONTRACTOR) -> rule_contractor_deny does NOT match, permit matches
+        user_identity = SecurityIdentity.create("user1", "TENANT_1", {"USER"}, 3, "ENG", {})
+        req1 = PolicyEvaluationRequest.create(
+            subject=user_identity,
+            action=ACTION_TOOL_EXECUTE,
+            resource={"target_id": "normal_tool"},
+            context={},
+        )
+        dec1 = engine.evaluate(req1)
+        self.assertEqual(dec1.decision, DECISION_PERMIT)
+
+        # Subject has CONTRACTOR with clearance 3 -> matches rule_contractor_deny
+        contractor_identity = SecurityIdentity.create("c1", "TENANT_1", {"CONTRACTOR"}, 3, "ENG", {})
+        req2 = PolicyEvaluationRequest.create(
+            subject=contractor_identity,
+            action=ACTION_TOOL_EXECUTE,
+            resource={"target_id": "normal_tool"},
+            context={},
+        )
+        dec2 = engine.evaluate(req2)
+        self.assertEqual(dec2.decision, DECISION_DENY)
+
     def test_remote_opa_adapter_circuit_breaker(self):
         # Invalid endpoint URL to test circuit breaker tripping on failures
         adapter = RemotePDPAdapter.create(
@@ -69,10 +111,11 @@ class TestPDPCachingAndOPA(unittest.TestCase):
     def test_tier1_invocation_cache(self):
         from security_core.pdp import RoleGraph
         from security_core.cel_evaluator import CELEvaluator
-        from security_core.audit import AuditManager, InMemoryAuditLogger
+        from security_core.audit import AuditManager
+        from tests.audit_test_collector import TestAuditCollector
         role_graph = RoleGraph.create()
         cel_eval = CELEvaluator.create()
-        audit_logger = InMemoryAuditLogger.create()
+        audit_logger = TestAuditCollector.create()
         audit_mgr = AuditManager.create(publishers=[audit_logger])
         engine = EmbeddedPolicyEngine.with_components(role_graph, cel_eval, audit_mgr)
 

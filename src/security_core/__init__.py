@@ -24,7 +24,6 @@ from security_core.audit import (
     AuditManager,
     AuditPublisherSPI,
     ConsoleAuditLogger,
-    InMemoryAuditLogger,
 )
 from security_core.prompt_injection import (
     PromptInjectionScanner,
@@ -76,7 +75,6 @@ __all__ = [
     "AuditManager",
     "AuditPublisherSPI",
     "ConsoleAuditLogger",
-    "InMemoryAuditLogger",
     "PromptInjectionScanner",
     "PromptInjectionScanResult",
     "DiagnosticReasonEnum",

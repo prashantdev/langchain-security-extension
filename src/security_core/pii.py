@@ -28,6 +28,8 @@ from security_core.constants import (
     PII_STAGE_TOOL_OUTPUT,
     PHONE_CONTEXT_WINDOW_CHARS,
     DEFAULT_PHONE_HINT_PATTERN,
+    SSN_CONTEXT_WINDOW_CHARS,
+    DEFAULT_SSN_HINT_PATTERN,
 )
 
 DEFAULT_MAX_CHARS: int = DEFAULT_PAYLOAD_MAX_CHARS
@@ -155,13 +157,14 @@ class BuiltInPiiSanitizer(PiiSanitizerSPI):
         r'|(?P<private_key>-----BEGIN [A-Z\s]+ PRIVATE KEY-----[A-Za-z0-9+/=\s]+-----END [A-Z\s]+ PRIVATE KEY-----)'
         r'|(?P<email>\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,7}\b)'
         r'|(?P<ipv4>\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b)'
-        r'|(?P<ssn>\b\d{3}[-\s]\d{2}[-\s]\d{4}\b)'
+        r'|(?P<ssn>\b\d{3}[-\s]\d{2}[-\s]\d{4}\b|\b\d{9}\b)'
         r'|(?P<card>\b(?:\d{4}[-\s]?){3}\d{1,7}\b|\b\d{13,19}\b)'
         r'|(?P<phone>(?:\+\d{1,3}[-.\s]?)?(?:\(\d{3}\)[-.\s]?|\b\d{3}[-.\s])\d{3}[-.\s]\d{4}\b|\b\d{10}\b)',
         re.IGNORECASE,
     )
 
     PHONE_HINT_REGEX = re.compile(DEFAULT_PHONE_HINT_PATTERN, re.IGNORECASE)
+    SSN_HINT_REGEX = re.compile(DEFAULT_SSN_HINT_PATTERN, re.IGNORECASE)
 
 
     def __init__(self, *args: Any, **kwargs: Any):
@@ -212,6 +215,17 @@ class BuiltInPiiSanitizer(PiiSanitizerSPI):
             if is_valid_luhn(digits):
                 return REDACTED_TOKEN
             return text
+
+        if group_dict.get("ssn"):
+            digits = "".join(c for c in text if c.isdigit())
+            # For 9-digit numbers lacking SSN formatting delimiters, require proximity to SSN keywords
+            if len(digits) == 9 and not any(c in text for c in "- "):
+                start_idx = max(0, match.start() - SSN_CONTEXT_WINDOW_CHARS)
+                end_idx = min(len(full_text), match.end() + SSN_CONTEXT_WINDOW_CHARS)
+                window = full_text[start_idx:end_idx]
+                if not self.SSN_HINT_REGEX.search(window):
+                    return text
+            return REDACTED_TOKEN
 
         if group_dict.get("phone"):
             digits = "".join(c for c in text if c.isdigit())

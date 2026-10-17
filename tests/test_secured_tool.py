@@ -83,10 +83,11 @@ class TestSecuredToolDecorator(unittest.TestCase):
         self.assertEqual(res["diagnostic_reason"], "MISSING_REQUIRED_ROLE")
 
     def test_parameter_privilege_escalation_detection(self):
-        from security_core.audit import AuditManager, InMemoryAuditLogger
+        from security_core.audit import AuditManager
+        from tests.audit_test_collector import TestAuditCollector
         from security_core.constants import EVENT_PARAMETER_PRIVILEGE_ESCALATION
 
-        logger = InMemoryAuditLogger.create()
+        logger = TestAuditCollector.create()
         audit_mgr = AuditManager.create(publishers=[logger])
         pdp = EmbeddedPolicyEngine.create()
         pdp._audit_manager = audit_mgr

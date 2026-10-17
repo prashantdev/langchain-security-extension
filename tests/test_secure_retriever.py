@@ -69,11 +69,12 @@ class TestSecureRetriever(unittest.TestCase):
     def test_retriever_secondary_paging_and_audit(self):
         from security_core.pdp import RoleGraph
         from security_core.cel_evaluator import CELEvaluator
-        from security_core.audit import AuditManager, InMemoryAuditLogger
+        from security_core.audit import AuditManager
+        from tests.audit_test_collector import TestAuditCollector
         from security_core.constants import EVENT_RAG_UNAUTHORIZED_PRUNING
         role_graph = RoleGraph.create()
         cel_eval = CELEvaluator.create()
-        audit_logger = InMemoryAuditLogger.create()
+        audit_logger = TestAuditCollector.create()
         audit_mgr = AuditManager.create(publishers=[audit_logger])
         engine = EmbeddedPolicyEngine.with_components(role_graph, cel_eval, audit_mgr)
 

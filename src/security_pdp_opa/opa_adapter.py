@@ -59,8 +59,7 @@ class RemotePDPAdapter(PolicyDecisionEngine):
             "recovery_timeout_seconds",
             args[3] if len(args) > 3 else DEFAULT_CIRCUIT_BREAKER_RECOVERY_SECONDS,
         )
-        fallback_engine = kwargs.get("fallback_engine", args[4] if len(args) > 4 else None)
-        audit_manager = kwargs.get("audit_manager", args[5] if len(args) > 5 else None)
+        audit_manager = kwargs.get("audit_manager", args[4] if len(args) > 4 else None)
 
         self._endpoint_url = endpoint_url
         self._timeout_seconds = float(timeout_seconds)
@@ -70,7 +69,6 @@ class RemotePDPAdapter(PolicyDecisionEngine):
         self._state = CircuitBreakerState.CLOSED
         self._opened_at: Optional[float] = None
         self._decision_cache: Optional[TwoTierDecisionCache] = decision_cache
-        self._fallback_engine: Optional[PolicyDecisionEngine] = fallback_engine
         self._audit_manager: Optional[AuditManager] = audit_manager
 
     @classmethod
@@ -107,19 +105,13 @@ class RemotePDPAdapter(PolicyDecisionEngine):
 
     @property
     def role_graph(self):
-        """Delegate role_graph lookup to fallback engine if configured."""
-        if self._fallback_engine and hasattr(self._fallback_engine, "role_graph"):
-            return self._fallback_engine.role_graph
+        """No embedded role graph in remote adapter."""
         return None
 
     @property
     def audit_manager(self) -> Optional[AuditManager]:
         """Get configured AuditManager."""
-        if self._audit_manager:
-            return self._audit_manager
-        if self._fallback_engine and hasattr(self._fallback_engine, "audit_manager"):
-            return self._fallback_engine.audit_manager
-        return None
+        return self._audit_manager
 
     @property
     def circuit_state(self) -> CircuitBreakerState:
@@ -129,32 +121,21 @@ class RemotePDPAdapter(PolicyDecisionEngine):
     @property
     def decision_cache(self) -> Optional[TwoTierDecisionCache]:
         """Get configured TwoTierDecisionCache."""
-        if self._decision_cache:
-            return self._decision_cache
-        if self._fallback_engine and hasattr(self._fallback_engine, "decision_cache"):
-            return self._fallback_engine.decision_cache
-        return None
+        return self._decision_cache
 
     def register_invalidation_callback(self, callback: Any) -> None:
         """Register a callback for cache invalidation events."""
-        if self._fallback_engine and hasattr(self._fallback_engine, "register_invalidation_callback"):
-            self._fallback_engine.register_invalidation_callback(callback)
-        else:
-            callbacks = getattr(self, "_invalidation_callbacks", None)
-            if callbacks is None:
-                self._invalidation_callbacks = []
-            self._invalidation_callbacks.append(callback)
+        callbacks = getattr(self, "_invalidation_callbacks", None)
+        if callbacks is None:
+            self._invalidation_callbacks = []
+        self._invalidation_callbacks.append(callback)
 
     def clear_cache(self) -> None:
         """Flush decision cache."""
         self.invalidate_cache()
-        if self._fallback_engine and hasattr(self._fallback_engine, "clear_cache"):
-            self._fallback_engine.clear_cache()
 
     def evict_subject_cache(self, subject_id: str, *args: Any, **kwargs: Any) -> int:
         """Evict cached decisions for a specific subject."""
-        if self._fallback_engine and hasattr(self._fallback_engine, "evict_subject_cache"):
-            return self._fallback_engine.evict_subject_cache(subject_id, *args, **kwargs)
         if self._decision_cache:
             return self._decision_cache.evict_subject(subject_id, *args, **kwargs)
         return 0
@@ -328,8 +309,6 @@ class RemotePDPAdapter(PolicyDecisionEngine):
         if isinstance(req_config, dict) and isinstance(req_config.get("configurable"), dict):
             req_config["configurable"]["sec:circuit_breaker_state"] = self._state.value
 
-        if self._fallback_engine is not None:
-            return self._fallback_engine.evaluate(request)
         return PolicyDecision.deny(
             diagnostic_reason=reason,
             obligations={},

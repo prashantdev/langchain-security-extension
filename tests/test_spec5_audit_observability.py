@@ -10,7 +10,6 @@ from security_core.audit import (
     AuditEvent,
     AuditSanitizer,
     AuditManager,
-    InMemoryAuditLogger,
     JsonFileAuditLogger,
     OpenTelemetryLogsPublisher,
 )

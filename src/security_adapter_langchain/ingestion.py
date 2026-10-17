@@ -457,8 +457,31 @@ class SecurityEnvelopeValidator(BaseDocumentTransformer):
         """Get configured HMAC secret key."""
         return self._secret_key
 
-    @staticmethod
-    def validate(document: Any) -> bool:
+    @classmethod
+    def has_mandatory_envelope(cls, metadata: Dict[str, Any]) -> bool:
+        """Validate if document metadata contains mandatory sec:* envelope keys according to Spec 1.
+
+        Mandatory keys:
+        - sec:schema_version
+        - sec:document_id
+        - sec:chunk_index
+        - sec:tenant_id
+        - sec:classification_level (or sec:clearance_level)
+        - sec:allowed_roles (or sec:required_roles)
+        """
+        if not isinstance(metadata, dict):
+            return False
+        has_version = bool(metadata.get(SEC_SCHEMA_VERSION))
+        has_doc_id = bool(metadata.get(SEC_DOCUMENT_ID))
+        has_chunk_idx = metadata.get(SEC_CHUNK_INDEX) is not None
+        has_tenant = bool(metadata.get(SEC_TENANT_ID))
+        has_class = bool(metadata.get(SEC_CLASSIFICATION_LEVEL) or metadata.get("sec:clearance_level") is not None)
+        roles = metadata.get(SEC_ALLOWED_ROLES) or metadata.get(SEC_REQUIRED_ROLES)
+        has_roles = bool(roles and len(roles) > 0)
+        return bool(has_version and has_doc_id and has_chunk_idx and has_tenant and has_class and has_roles)
+
+    @classmethod
+    def validate(cls, document: Any) -> bool:
         """Validate if document metadata contains mandatory sec:* envelope keys.
 
         Args:
@@ -468,11 +491,7 @@ class SecurityEnvelopeValidator(BaseDocumentTransformer):
             bool: True if required security metadata exists.
         """
         meta = getattr(document, "metadata", {}) if not isinstance(document, dict) else document
-        has_tenant = bool(meta.get(SEC_TENANT_ID))
-        has_class = bool(meta.get(SEC_CLASSIFICATION_LEVEL) or meta.get("sec:clearance_level") is not None)
-        roles = meta.get(SEC_ALLOWED_ROLES) or meta.get(SEC_REQUIRED_ROLES)
-        has_roles = bool(roles and len(roles) > 0)
-        return bool(has_tenant and has_class and has_roles)
+        return cls.has_mandatory_envelope(meta)
 
     def validate_metadata(self, metadata: Dict[str, Any]) -> bool:
         """Validate metadata dictionary key presence and HMAC signature integrity.
@@ -487,11 +506,7 @@ class SecurityEnvelopeValidator(BaseDocumentTransformer):
             return False
         if metadata.get("sec:corrupt") or metadata.get("sec:unlabelled") or metadata.get("sec:unlabelled_raw"):
             return False
-        has_tenant = bool(metadata.get(SEC_TENANT_ID))
-        has_class = bool(metadata.get(SEC_CLASSIFICATION_LEVEL) or metadata.get("sec:clearance_level") is not None)
-        roles = metadata.get(SEC_ALLOWED_ROLES) or metadata.get(SEC_REQUIRED_ROLES)
-        has_roles = bool(roles and len(roles) > 0)
-        if not (has_tenant and has_class and has_roles):
+        if not self.has_mandatory_envelope(metadata):
             return False
 
         if self._secret_key and SEC_ENVELOPE_HASH in metadata:
@@ -614,6 +629,7 @@ class DocumentSecurityTransformer(BaseDocumentTransformer):
             doc_id = meta.get(SEC_DOCUMENT_ID, str(uuid.uuid4()))
             meta[SEC_SCHEMA_VERSION] = DEFAULT_SCHEMA_VERSION
             meta[SEC_DOCUMENT_ID] = doc_id
+            meta.setdefault(SEC_CHUNK_INDEX, 0)
             meta[SEC_TENANT_ID] = tenant
             meta[SEC_CLASSIFICATION_LEVEL] = classification
             meta["sec:clearance_level"] = clearance
@@ -798,8 +814,9 @@ class SecureTextSplitter(BaseDocumentTransformer):
                 text_splits = [text]
             elif not text_splits and text == "":
                 text_splits = [""]
-            for split_chunk in text_splits:
+            for chunk_idx, split_chunk in enumerate(text_splits):
                 chunk_meta = dict(metadata)
+                chunk_meta[SEC_CHUNK_INDEX] = chunk_idx
                 if isinstance(doc, SecureDocument):
                     chunks.append(SecureDocument.create(page_content=split_chunk, metadata=chunk_meta))
                 else:
@@ -1024,6 +1041,11 @@ class SecureVectorStoreIngestor:
         for idx, doc in enumerate(enriched_docs):
             meta = dict(getattr(doc, "metadata", {}))
             doc_id = str(meta.get(SEC_DOCUMENT_ID, default_doc_id))
+            meta[SEC_DOCUMENT_ID] = doc_id
+            if meta.get(SEC_CHUNK_INDEX) is None:
+                meta[SEC_CHUNK_INDEX] = idx
+            if not meta.get(SEC_SCHEMA_VERSION):
+                meta[SEC_SCHEMA_VERSION] = DEFAULT_SCHEMA_VERSION
             meta.pop("sec:unlabelled_raw", None)
 
             if not self._validator.validate_metadata(meta):
@@ -1122,8 +1144,9 @@ class SecureVectorStoreIngestor:
                     chunks = [content]
                 elif not chunks and content == "":
                     chunks = [""]
-                for chunk in chunks:
+                for chunk_idx, chunk in enumerate(chunks):
                     chunk_meta = dict(meta)
+                    chunk_meta[SEC_CHUNK_INDEX] = chunk_idx
                     if isinstance(doc, SecureDocument):
                         split_docs.append(SecureDocument.create(page_content=chunk, metadata=chunk_meta))
                     else:
@@ -1139,8 +1162,9 @@ class SecureVectorStoreIngestor:
                     chunks = [content]
                 elif not chunks and content == "":
                     chunks = [""]
-                for chunk in chunks:
+                for chunk_idx, chunk in enumerate(chunks):
                     chunk_meta = dict(meta)
+                    chunk_meta[SEC_CHUNK_INDEX] = chunk_idx
                     if isinstance(doc, SecureDocument):
                         split_docs.append(SecureDocument.create(page_content=chunk, metadata=chunk_meta))
                     else:

@@ -25,12 +25,15 @@ from security_core.constants import (
     SEVERITY_WARNING,
     SEVERITY_CRITICAL_ALERT,
     SEC_TENANT_ID,
+    SEC_CLASSIFICATION_LEVEL,
     SEC_CLEARANCE_FLOOR,
     SEC_ALLOWED_ROLES,
     SEC_REQUIRED_ROLES,
     SEC_DEPARTMENT_ID,
     SEC_ENVELOPE_HASH,
     SEC_QUARANTINED,
+    ANONYMOUS_SUBJECT_ID,
+    CLASSIFICATION_TO_RANK,
     PII_SCOPE_FULL_IN_FLIGHT,
     PII_STAGE_RETRIEVAL_DOCUMENT,
 )
@@ -231,7 +234,7 @@ class SecureRetriever(BaseRetriever):
         Returns:
             PrefilterAST: Full prefilter AST dictionary.
         """
-        if identity is None or identity.subject_id == "anonymous":
+        if identity is None or identity.is_anonymous or identity.subject_id is None or str(identity.subject_id).upper() == ANONYMOUS_SUBJECT_ID:
             return PrefilterAST({SEC_TENANT_ID: "__DENY_ALL_UNAUTHENTICATED__"})
 
         and_clauses: List[Dict[str, Any]] = [
@@ -370,8 +373,31 @@ class SecureRetriever(BaseRetriever):
                 if isinstance(config, dict) and isinstance(config.get("configurable"), dict):
                     config["configurable"]["sec:envelope_verified"] = True
 
-            doc_tenant = metadata.get(SEC_TENANT_ID, resolved_identity.tenant_id)
-            doc_clearance = int(metadata.get(SEC_CLEARANCE_FLOOR, metadata.get("sec:clearance_level", 0)))
+            # Mandatory envelope verification: verify mandatory security envelope tags
+            doc_tenant = metadata.get(SEC_TENANT_ID)
+            has_tenant = bool(doc_tenant)
+            has_classification = bool(
+                metadata.get(SEC_CLASSIFICATION_LEVEL)
+                or metadata.get(SEC_CLEARANCE_FLOOR) is not None
+                or metadata.get("sec:clearance_level") is not None
+            )
+            if not (has_tenant and has_classification):
+                if audit_manager:
+                    audit_manager.record_event(AuditEvent.create(
+                        subject_id=resolved_identity.subject_id,
+                        tenant_id=resolved_identity.tenant_id,
+                        action=ACTION_CHUNK_RETRIEVE,
+                        resource=str(metadata.get("source", "document_chunk")),
+                        decision="PRUNED",
+                        diagnostic_reason="Missing mandatory security metadata: tenant_id or classification",
+                        severity=SEVERITY_NOTICE,
+                        metadata={"doc_metadata": metadata},
+                        enforcement_point=PEP_RAG_FILTER,
+                        reason_code=EVENT_RAG_UNAUTHORIZED_PRUNING,
+                    ))
+                continue
+
+            doc_clearance = int(metadata.get(SEC_CLEARANCE_FLOOR, metadata.get("sec:clearance_level", CLASSIFICATION_TO_RANK.get(str(metadata.get(SEC_CLASSIFICATION_LEVEL, "")).upper(), 0))))
             doc_roles = metadata.get(SEC_ALLOWED_ROLES, metadata.get(SEC_REQUIRED_ROLES, []))
             if isinstance(doc_roles, str):
                 doc_roles = [r.strip() for r in doc_roles.split(",") if r.strip()]

@@ -247,7 +247,7 @@ EVENT_TOOL_RETRY_BUDGET_EXCEEDED: str = "TOOL_RETRY_BUDGET_EXCEEDED"
 EVENT_RAG_UNAUTHORIZED_PRUNING: str = "RAG_UNAUTHORIZED_PRUNING"
 """Audit event emitted when retrieved document chunks are pruned due to clearance/role mismatch."""
 
-EVENT_RAG_RESULT_STARVATION: str = "EVENT_RAG_RESULT_STARVATION"
+EVENT_RAG_RESULT_STARVATION: str = "RAG_RESULT_STARVATION"
 """Audit event emitted when all retrieved vector store candidates are pruned by security filter."""
 
 EVENT_INGEST_CHUNK_REJECTED: str = "INGEST_CHUNK_REJECTED"
@@ -520,3 +520,10 @@ PHONE_CONTEXT_WINDOW_CHARS: int = 40
 
 DEFAULT_PHONE_HINT_PATTERN: str = r"(?:tele)?phone|fon(?:e)?"
 """Regex pattern for detecting phone keywords near a 10-digit number."""
+
+SSN_CONTEXT_WINDOW_CHARS: int = 40
+"""Character window before and after an unhyphenated 9-digit number checked for SSN context keywords."""
+
+DEFAULT_SSN_HINT_PATTERN: str = r"(?i)\b(?:ssn|s\s*s\s*n|social\s+security\s+(?:number|no|#)?|social\s+sec\s*#?)\b"
+"""Regex pattern for detecting SSN keywords near an unhyphenated 9-digit number."""
+

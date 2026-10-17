@@ -132,6 +132,11 @@ class SecurityIdentity:
         return self._department_id
 
     @property
+    def is_anonymous(self) -> bool:
+        """Return True if identity represents an anonymous or unauthenticated subject."""
+        return bool(self._subject_id is None or str(self._subject_id).upper() == ANONYMOUS_SUBJECT_ID)
+
+    @property
     def attributes(self) -> Dict[str, Any]:
         """Get a copy of dynamic attributes attached to identity."""
         return dict(self._attributes)

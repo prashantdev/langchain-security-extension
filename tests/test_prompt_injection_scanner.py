@@ -3,15 +3,16 @@ Unit tests for PromptInjectionScanner subsystem and threat auditing.
 """
 
 import unittest
-from security_core.audit import AuditManager, InMemoryAuditLogger
+from security_core.audit import AuditManager
 from security_core.prompt_injection import PromptInjectionScanner
 from security_core.constants import EVENT_PROMPT_INJECTION_DETECTED
+from tests.audit_test_collector import TestAuditCollector
 
 
 class TestPromptInjectionScanner(unittest.TestCase):
 
     def test_prompt_injection_scanner_detection_and_audit(self):
-        logger = InMemoryAuditLogger.create()
+        logger = TestAuditCollector.create()
         audit_mgr = AuditManager.create(publishers=[logger])
         scanner = PromptInjectionScanner.create(audit_manager=audit_mgr)
 

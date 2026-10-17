@@ -98,7 +98,14 @@ class TestSecureIngestionPipeline(unittest.TestCase):
         self.assertEqual(docs_public[0].metadata["sec:tenant_id"], "CORP")
 
     def test_hmac_digest_verification(self):
-        meta = {"sec:tenant_id": "CORP", "sec:classification_level": "INTERNAL", "sec:allowed_roles": ["ADMIN"]}
+        meta = {
+            "sec:schema_version": "1.0",
+            "sec:document_id": "doc-001",
+            "sec:chunk_index": 0,
+            "sec:tenant_id": "CORP",
+            "sec:classification_level": "INTERNAL",
+            "sec:allowed_roles": ["ADMIN"],
+        }
         secret = "super-secret-key"
         signature = compute_envelope_hmac(meta, secret)
         meta["sec:envelope_hash"] = signature
@@ -112,9 +119,10 @@ class TestSecureIngestionPipeline(unittest.TestCase):
         self.assertFalse(validator.validate_metadata(tampered_meta))
 
     def test_ingestion_audit_events(self):
-        from security_core.audit import AuditManager, InMemoryAuditLogger
+        from security_core.audit import AuditManager
+        from tests.audit_test_collector import TestAuditCollector
         from security_core.constants import EVENT_INGEST_CHUNK_REJECTED
-        logger = InMemoryAuditLogger.create()
+        logger = TestAuditCollector.create()
         audit_mgr = AuditManager.create(publishers=[logger])
         transformer = DocumentSecurityTransformer()
         enricher = SecureDocumentChunkEnricher()

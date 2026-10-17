@@ -3,8 +3,9 @@ Unit tests for OCSF Audit Event Schema, 3-Stage Sanitization, and SIEM publishin
 """
 
 import unittest
-from security_core.audit import AuditEvent, AuditSanitizer, PythonLoggingAuditPublisher, AuditManager, InMemoryAuditLogger
+from security_core.audit import AuditEvent, AuditSanitizer, PythonLoggingAuditPublisher, AuditManager
 from security_core.constants import SEVERITY_INFORMATIONAL, DECISION_PERMIT
+from tests.audit_test_collector import TestAuditCollector
 
 
 class TestAsyncAuditPipeline(unittest.TestCase):
@@ -45,7 +46,7 @@ class TestAsyncAuditPipeline(unittest.TestCase):
         self.assertEqual(cleaned["normal_field"], "Normal operational text")
 
     def test_audit_manager_ring_buffer_backpressure(self):
-        logger = InMemoryAuditLogger.create()
+        logger = TestAuditCollector.create()
         # Ring buffer capacity of 2
         manager = AuditManager.create(publishers=[logger], capacity=2)
 
@@ -61,7 +62,7 @@ class TestAsyncAuditPipeline(unittest.TestCase):
 
     def test_audit_manager_default_capacity_and_drop_oldest(self):
         from security_core.constants import DEFAULT_RING_BUFFER_CAPACITY
-        logger = InMemoryAuditLogger.create()
+        logger = TestAuditCollector.create()
         manager = AuditManager.create(publishers=[logger])
         self.assertEqual(manager._capacity, DEFAULT_RING_BUFFER_CAPACITY)
         self.assertEqual(manager._capacity, 16384)

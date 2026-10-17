@@ -6,7 +6,8 @@ import time
 import unittest
 from security_core.identity import SecurityIdentity, IdentityBridge
 from security_core.pdp import EmbeddedPolicyEngine
-from security_core.audit import AuditManager, InMemoryAuditLogger
+from security_core.audit import AuditManager
+from tests.audit_test_collector import TestAuditCollector
 from security_core.exceptions import ToolExecutionDeniedError
 from security_core.constants import (
     EVENT_POLICY_BRUTE_FORCE_DETECTED,
@@ -26,7 +27,7 @@ from security_adapter_langchain.violation_handler import (
 class TestViolationHandler(unittest.TestCase):
 
     def setUp(self) -> None:
-        self.logger = InMemoryAuditLogger.create()
+        self.logger = TestAuditCollector.create()
         self.audit_mgr = AuditManager.create(publishers=[self.logger])
         self.pdp = EmbeddedPolicyEngine.create()
         self.pdp._audit_manager = self.audit_mgr

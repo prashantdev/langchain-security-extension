@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Dict, List, Set, Any, Optional
 from security_core.identity import SecurityIdentity
 from security_core.cel_evaluator import CELEvaluator
-from security_core.audit import AuditManager, AuditEvent, InMemoryAuditLogger
+from security_core.audit import AuditManager, AuditEvent
 from security_core.constants import (
     DECISION_PERMIT,
     DECISION_DENY,
@@ -25,6 +25,8 @@ from security_core.constants import (
     REASON_MISSING_REQUIRED_ROLE,
     REASON_PARAMETER_CONSTRAINT_FAILED,
     REASON_QUARANTINED_CHUNK,
+    REASON_UNAUTHENTICATED,
+    ANONYMOUS_SUBJECT_ID,
     SEVERITY_INFORMATIONAL,
     SEVERITY_WARNING,
     SEVERITY_SECURITY_ALERT,
@@ -626,7 +628,7 @@ class EmbeddedPolicyEngine(PolicyDecisionEngine):
         return cls(
             role_graph=RoleGraph.create(),
             cel_evaluator=CELEvaluator.create(),
-            audit_manager=AuditManager.create(publishers=[InMemoryAuditLogger.create()]),
+            audit_manager=AuditManager.create(publishers=[]),
         )
 
     @classmethod
@@ -769,6 +771,32 @@ class EmbeddedPolicyEngine(PolicyDecisionEngine):
                 self._cache.put_static(cache_key, decision)
                 return decision
 
+        # 0.1 Unauthenticated Subject Check (Fail-closed for anonymous unless explicitly permitted by rule)
+        is_anon = (
+            subject is None
+            or subject.is_anonymous
+            or subject.subject_id is None
+            or str(subject.subject_id).upper() == ANONYMOUS_SUBJECT_ID
+        )
+        if is_anon:
+            anon_permitted = False
+            if self._rules:
+                for rule in self._rules:
+                    if (rule.target_action == "*" or rule.target_action == request.action) and rule.effect == DECISION_PERMIT:
+                        anon_permitted = True
+                        break
+            if not anon_permitted:
+                decision = self._record_and_return(
+                    request=request,
+                    decision_status=DECISION_DENY,
+                    diagnostic_reason=REASON_UNAUTHENTICATED,
+                    severity=SEVERITY_WARNING,
+                    obligations={},
+                    reason_code=REASON_UNAUTHENTICATED,
+                )
+                self._cache.put_static(cache_key, decision)
+                return decision
+
         # 1. Multi-Tenancy Check
         required_tenant = resource.get("tenant_id")
         if required_tenant:
@@ -855,19 +883,44 @@ class EmbeddedPolicyEngine(PolicyDecisionEngine):
             matched_permit = False
             for rule in self._rules:
                 if rule.target_action == "*" or rule.target_action == request.action:
-                    if rule.effect == DECISION_DENY:
-                        decision = self._record_and_return(
-                            request=request,
-                            decision_status=DECISION_DENY,
-                            diagnostic_reason=f"Rule {rule.rule_id} DENY",
-                            severity=SEVERITY_SECURITY_ALERT,
-                            obligations={"strategy": rule.on_denial},
-                            reason_code=None,
-                        )
-                        self._cache.put_static(cache_key, decision)
-                        return decision
-                    elif rule.effect == DECISION_PERMIT:
-                        matched_permit = True
+                    # Validate rule constraints: roles, clearance, cel_condition
+                    rule_matches = True
+
+                    if rule.required_roles:
+                        expanded_roles = self._role_graph.expand_roles(subject.roles)
+                        if not set(rule.required_roles).intersection(expanded_roles):
+                            rule_matches = False
+
+                    if rule_matches and rule.min_clearance is not None:
+                        if subject.clearance_level < int(rule.min_clearance):
+                            rule_matches = False
+
+                    if rule_matches and rule.cel_condition:
+                        runtime_args = resource.get("arguments", {})
+                        tool_meta = resource.get("tool_metadata", {})
+                        if not self._cel_evaluator.evaluate(
+                            expression=rule.cel_condition,
+                            subject=subject,
+                            args=runtime_args,
+                            tool=tool_meta,
+                            config=req_config,
+                        ):
+                            rule_matches = False
+
+                    if rule_matches:
+                        if rule.effect == DECISION_DENY:
+                            decision = self._record_and_return(
+                                request=request,
+                                decision_status=DECISION_DENY,
+                                diagnostic_reason=f"Rule {rule.rule_id} DENY",
+                                severity=SEVERITY_SECURITY_ALERT,
+                                obligations={"strategy": rule.on_denial},
+                                reason_code=None,
+                            )
+                            self._cache.put_static(cache_key, decision)
+                            return decision
+                        elif rule.effect == DECISION_PERMIT:
+                            matched_permit = True
 
             if not matched_permit:
                 decision = self._record_and_return(

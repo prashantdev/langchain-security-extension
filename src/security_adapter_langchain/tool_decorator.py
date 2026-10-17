@@ -127,25 +127,6 @@ class SecuredToolConfig:
             *args,
             **kwargs,
         )
-        """Factory method to construct SecuredToolConfig.
-
-        Args:
-            required_roles: Roles list.
-            min_clearance: Clearance floor.
-            cel_expression: CEL expression string.
-            is_mutative: Mutative boolean flag.
-            pdp_engine: Policy decision engine instance.
-
-        Returns:
-            SecuredToolConfig: New configuration object.
-        """
-        return cls(
-            required_roles=required_roles,
-            min_clearance=min_clearance,
-            cel_expression=cel_expression,
-            is_mutative=is_mutative,
-            pdp_engine=pdp_engine,
-        )
 
     @property
     def required_roles(self) -> List[str]:
@@ -307,11 +288,16 @@ def secured_tool(
                     aliases[snake] = v
             bound_args.update(aliases)
 
+            # Resolve target tenant: check decorator kwargs, bound arguments (e.g. tenant_id/tenantId), or default to caller
+            resolved_tenant = kwargs.get("target_tenant") or bound_args.get("tenant_id") or bound_args.get("tenantId") or caller_identity.tenant_id
+
             tool_name = func.__name__
+            tool_module = getattr(func, "__module__", "")
+
             resource_descriptor = {
                 "name": tool_name,
                 "target_id": tool_name,
-                "tenant_id": caller_identity.tenant_id,
+                "tenant_id": resolved_tenant,
                 "required_roles": required_roles,
                 "min_clearance": min_clearance,
                 "cel_expression": cel_expression,
@@ -321,6 +307,8 @@ def secured_tool(
                 "tool_metadata": {
                     "name": tool_name,
                     "isMutative": is_mutative,
+                    "module": tool_module,
+                    "classificationLevel": min_clearance,
                 },
             }
 

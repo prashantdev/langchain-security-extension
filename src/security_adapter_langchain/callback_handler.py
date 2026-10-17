@@ -10,7 +10,11 @@ from langchain_core.callbacks import BaseCallbackHandler
 from security_core.identity import SecurityIdentity
 from security_core.pdp import PolicyDecisionEngine, PolicyEvaluationRequest
 from security_core.constants import ACTION_AGENT_INVOKE, ACTION_TOOL_EXECUTE
-from security_core.exceptions import SecurityAuthorizationError, ToolExecutionDeniedError
+from security_core.exceptions import (
+    SecurityAuthorizationError,
+    ToolExecutionDeniedError,
+    ToolExecutionFeedbackException,
+)
 
 
 class SecureCallbackHandler(BaseCallbackHandler):
@@ -165,8 +169,13 @@ class SecureCallbackHandler(BaseCallbackHandler):
         if not decision.is_permitted:
             strategy = decision.obligations.get("strategy")
             if strategy == "RETURN_FEEDBACK" and not is_mutative:
-                # Feedback strategy returns synthetic info
-                return
+                refusal_payload = {
+                    "status": "ACCESS_DENIED",
+                    "tool": tool_name,
+                    "reason": f"Tool execution denied for '{tool_name}': {decision.diagnostic_reason}",
+                    "diagnostic_reason": decision.diagnostic_reason,
+                }
+                raise ToolExecutionFeedbackException.create_payload(tool_name, refusal_payload)
             raise ToolExecutionDeniedError.for_tool(
                 tool_name=tool_name,
                 message=f"Tool execution denied for '{tool_name}': {decision.diagnostic_reason}",

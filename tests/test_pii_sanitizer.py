@@ -22,7 +22,7 @@ from security_core.constants import (
 )
 from security_core.identity import SecurityIdentity
 from security_core.pdp import EmbeddedPolicyEngine
-from security_core.audit import AuditEvent, AuditManager, InMemoryAuditLogger
+from security_core.audit import AuditEvent, AuditManager
 from security_core.pii import (
     BuiltInPiiSanitizer,
     PiiContext,
@@ -128,6 +128,20 @@ class TestPiiSanitizer(unittest.TestCase):
         self.assertEqual(
             sanitizer.sanitize_text("SSN record is 123-45-6789 and secondary is 987 65 4321.", ctx),
             "SSN record is [REDACTED] and secondary is [REDACTED]."
+        )
+        # Unformatted 9-digit SSN near hint keyword -> Redacted
+        self.assertEqual(
+            sanitizer.sanitize_text("Employee SSN: 123456789 verified in payroll.", ctx),
+            "Employee SSN: [REDACTED] verified in payroll."
+        )
+        self.assertEqual(
+            sanitizer.sanitize_text("Social Security Number: 987654321 on file.", ctx),
+            "Social Security Number: [REDACTED] on file."
+        )
+        # Unformatted 9-digit number with no SSN hint keywords -> Untouched
+        self.assertEqual(
+            sanitizer.sanitize_text("Package tracking ID 123456789 dispatched to warehouse.", ctx),
+            "Package tracking ID 123456789 dispatched to warehouse."
         )
 
         # 4. Credit Cards (Luhn verified vs random numbers)

@@ -1,12 +1,13 @@
 import unittest
-from security_core.audit import AuditEvent, AuditManager, InMemoryAuditLogger
+from security_core.audit import AuditEvent, AuditManager
 from security_core.constants import AUDIT_SEVERITY_INFO, DECISION_PERMIT
+from tests.audit_test_collector import TestAuditCollector
 
 
 class TestAuditSubsystem(unittest.TestCase):
 
     def test_audit_event_creation_and_logging(self):
-        logger = InMemoryAuditLogger.create()
+        logger = TestAuditCollector.create()
         manager = AuditManager.create(publishers=[logger])
 
         event = AuditEvent.create(
