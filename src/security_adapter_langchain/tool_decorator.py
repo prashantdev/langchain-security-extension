@@ -378,8 +378,10 @@ def secured_tool(
                     from security_adapter_langchain.violation_handler import (
                         ViolationResolution,
                         STATUS_BLOCKED_BY_POLICY,
-                        REMED_SEC_BLOCKED_POLICY,
-                        REMED_EXEC_ABORTED,
+                        POLICY_STATUS_BLOCKED,
+                        POLICY_STATUS_FEEDBACK,
+                        EXECUTION_ACTION_ABORTED,
+                        EXECUTION_ACTION_FEEDBACK,
                     )
                     should_abort_flag = bool(strategy == STRATEGY_HARD_ABORT or is_mutative or retries > 2)
                     resolution = ViolationResolution.create(
@@ -387,8 +389,8 @@ def secured_tool(
                         action_entry=f"Blocked execution of tool '{tool_name}' ({decision.diagnostic_reason})",
                         root_cause=f"Policy violation: Access denied for tool '{tool_name}' ({decision.diagnostic_reason})",
                         user_message=reason_msg,
-                        remediation_security=REMED_SEC_BLOCKED_POLICY if should_abort_flag else "FEEDBACK_REFUSAL",
-                        remediation_execution=REMED_EXEC_ABORTED if should_abort_flag else "SYNTHETIC_PAYLOAD",
+                        policy_decision=POLICY_STATUS_BLOCKED if should_abort_flag else POLICY_STATUS_FEEDBACK,
+                        execution_action=EXECUTION_ACTION_ABORTED if should_abort_flag else EXECUTION_ACTION_FEEDBACK,
                         should_abort=should_abort_flag,
                         diagnostic_reason=decision.diagnostic_reason,
                         tool_name=tool_name,

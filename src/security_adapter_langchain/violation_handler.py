@@ -22,8 +22,12 @@ from security_core.constants import (
 from security_core.exceptions import ToolExecutionDeniedError
 
 STATUS_BLOCKED_BY_POLICY: str = "BLOCKED_BY_POLICY"
-REMED_SEC_BLOCKED_POLICY: str = "BLOCKED_POLICY"
-REMED_EXEC_ABORTED: str = "ABORTED"
+POLICY_STATUS_BLOCKED: str = "BLOCKED_POLICY"
+POLICY_STATUS_FEEDBACK: str = "FEEDBACK_REFUSAL"
+EXECUTION_ACTION_ABORTED: str = "ABORTED"
+EXECUTION_ACTION_FEEDBACK: str = "SYNTHETIC_PAYLOAD"
+REMED_SEC_BLOCKED_POLICY: str = POLICY_STATUS_BLOCKED
+REMED_EXEC_ABORTED: str = EXECUTION_ACTION_ABORTED
 DEFAULT_MAX_FEEDBACK_VIOLATIONS: int = 2
 CONFIG_RETRY_COUNT_KEY: str = "sec:retry_count"
 CONFIG_PREV_ARGS_KEY: str = "sec:prev_args"
@@ -38,8 +42,8 @@ class ViolationResolution:
         action_entry (str): Telemetry action string to record.
         root_cause (str): Diagnostic root cause classification.
         user_message (str): Sanitized explanation for end-user.
-        remediation_security (str): Security stage evaluation status.
-        remediation_execution (str): Execution stage evaluation status.
+        policy_decision (str): Policy evaluation outcome (e.g., BLOCKED_POLICY, FEEDBACK_REFUSAL).
+        execution_action (str): Runtime execution action (e.g., ABORTED, SYNTHETIC_PAYLOAD).
         should_abort (bool): Whether agent loop must abort immediately.
         diagnostic_reason (Optional[str]): Detailed diagnostic reason code.
         tool_name (Optional[str]): Target tool name associated with violation.
@@ -51,8 +55,8 @@ class ViolationResolution:
         action_entry: str,
         root_cause: str,
         user_message: str,
-        remediation_security: str,
-        remediation_execution: str,
+        policy_decision: str,
+        execution_action: str,
         should_abort: bool,
         diagnostic_reason: Optional[str],
         tool_name: Optional[str],
@@ -61,35 +65,33 @@ class ViolationResolution:
         self._action_entry = action_entry
         self._root_cause = root_cause
         self._user_message = user_message
-        self._remediation_security = remediation_security
-        self._remediation_execution = remediation_execution
+        self._policy_decision = policy_decision
+        self._execution_action = execution_action
         self._should_abort = should_abort
         self._diagnostic_reason = diagnostic_reason
         self._tool_name = tool_name
 
     @classmethod
-    def create(
-        cls,
-        status: str,
-        action_entry: str,
-        root_cause: str,
-        user_message: str,
-        remediation_security: str,
-        remediation_execution: str,
-        should_abort: bool,
-        diagnostic_reason: Optional[str],
-        tool_name: Optional[str],
-    ) -> "ViolationResolution":
+    def create(cls, *args: Any, **kwargs: Any) -> "ViolationResolution":
+        status = str(kwargs.get("status", args[0] if len(args) > 0 else ""))
+        action_entry = str(kwargs.get("action_entry", args[1] if len(args) > 1 else ""))
+        root_cause = str(kwargs.get("root_cause", args[2] if len(args) > 2 else ""))
+        user_message = str(kwargs.get("user_message", args[3] if len(args) > 3 else ""))
+        policy_decision = str(kwargs.get("policy_decision", kwargs.get("remediation_security", args[4] if len(args) > 4 else "")))
+        execution_action = str(kwargs.get("execution_action", kwargs.get("remediation_execution", args[5] if len(args) > 5 else "")))
+        should_abort = bool(kwargs.get("should_abort", args[6] if len(args) > 6 else False))
+        diagnostic_reason = kwargs.get("diagnostic_reason", args[7] if len(args) > 7 else None)
+        tool_name = kwargs.get("tool_name", args[8] if len(args) > 8 else None)
         return cls(
-            status=status,
-            action_entry=action_entry,
-            root_cause=root_cause,
-            user_message=user_message,
-            remediation_security=remediation_security,
-            remediation_execution=remediation_execution,
-            should_abort=should_abort,
-            diagnostic_reason=diagnostic_reason,
-            tool_name=tool_name,
+            status,
+            action_entry,
+            root_cause,
+            user_message,
+            policy_decision,
+            execution_action,
+            should_abort,
+            diagnostic_reason,
+            tool_name,
         )
 
     @property
@@ -109,12 +111,22 @@ class ViolationResolution:
         return self._user_message
 
     @property
+    def policy_decision(self) -> str:
+        return self._policy_decision
+
+    @property
+    def execution_action(self) -> str:
+        return self._execution_action
+
+    @property
     def remediation_security(self) -> str:
-        return self._remediation_security
+        """Backward-compatibility accessor for policy_decision."""
+        return self._policy_decision
 
     @property
     def remediation_execution(self) -> str:
-        return self._remediation_execution
+        """Backward-compatibility accessor for execution_action."""
+        return self._execution_action
 
     @property
     def should_abort(self) -> bool:
@@ -318,32 +330,32 @@ class ToolViolationHandler:
             action_entry = f"Blocked execution of tool '{tool_name}' (retry budget exceeded)"
             should_abort = True
             status = STATUS_BLOCKED_BY_POLICY
-            remed_sec = REMED_SEC_BLOCKED_POLICY
-            remed_exec = REMED_EXEC_ABORTED
+            policy_decision = POLICY_STATUS_BLOCKED
+            execution_action = EXECUTION_ACTION_ABORTED
         elif is_mutative:
             root_cause = f"Policy violation: Access denied for tool '{tool_name}' ({diagnostic_reason})"
             user_msg = f"Policy violation: Access denied for tool '{tool_name}' ({diagnostic_reason})"
             action_entry = f"Blocked execution of tool '{tool_name}' ({diagnostic_reason})"
             should_abort = True
             status = STATUS_BLOCKED_BY_POLICY
-            remed_sec = REMED_SEC_BLOCKED_POLICY
-            remed_exec = REMED_EXEC_ABORTED
+            policy_decision = POLICY_STATUS_BLOCKED
+            execution_action = EXECUTION_ACTION_ABORTED
         else:
             root_cause = f"Policy restriction: Informational tool '{tool_name}' access denied ({diagnostic_reason})"
             user_msg = f"Policy restriction: Informational tool '{tool_name}' access denied ({diagnostic_reason})"
             action_entry = f"Blocked execution of tool '{tool_name}' ({diagnostic_reason})"
             should_abort = is_abusing
             status = STATUS_BLOCKED_BY_POLICY if is_abusing else "ACCESS_DENIED"
-            remed_sec = REMED_SEC_BLOCKED_POLICY if is_abusing else "FEEDBACK_REFUSAL"
-            remed_exec = REMED_EXEC_ABORTED if is_abusing else "SYNTHETIC_PAYLOAD"
+            policy_decision = POLICY_STATUS_BLOCKED if is_abusing else POLICY_STATUS_FEEDBACK
+            execution_action = EXECUTION_ACTION_ABORTED if is_abusing else EXECUTION_ACTION_FEEDBACK
 
         resolution = ViolationResolution.create(
             status=status,
             action_entry=action_entry,
             root_cause=root_cause,
             user_message=user_msg,
-            remediation_security=remed_sec,
-            remediation_execution=remed_exec,
+            policy_decision=policy_decision,
+            execution_action=execution_action,
             should_abort=should_abort,
             diagnostic_reason=diagnostic_reason,
             tool_name=tool_name,
@@ -373,6 +385,10 @@ class ToolViolationHandler:
 
 __all__ = [
     "STATUS_BLOCKED_BY_POLICY",
+    "POLICY_STATUS_BLOCKED",
+    "POLICY_STATUS_FEEDBACK",
+    "EXECUTION_ACTION_ABORTED",
+    "EXECUTION_ACTION_FEEDBACK",
     "REMED_SEC_BLOCKED_POLICY",
     "REMED_EXEC_ABORTED",
     "DEFAULT_MAX_FEEDBACK_VIOLATIONS",

@@ -97,6 +97,8 @@ class TestViolationHandler(unittest.TestCase):
 
         self.assertIsInstance(resolution, ViolationResolution)
         self.assertEqual(resolution.status, STATUS_BLOCKED_BY_POLICY)
+        self.assertEqual(resolution.policy_decision, REMED_SEC_BLOCKED_POLICY)
+        self.assertEqual(resolution.execution_action, REMED_EXEC_ABORTED)
         self.assertEqual(resolution.remediation_security, REMED_SEC_BLOCKED_POLICY)
         self.assertEqual(resolution.remediation_execution, REMED_EXEC_ABORTED)
         self.assertTrue(resolution.should_abort)

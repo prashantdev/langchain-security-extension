@@ -254,7 +254,8 @@ def scan_and_enforce_ingestion(
             ingestion_mode=mode,
             audit_manager=audit_mgr,
         )
-        doc_id = str((context_metadata or {}).get("ticketId") or subject_id or "ingest_doc")
+        meta_ctx = context_metadata or {}
+        doc_id = str(meta_ctx.get("document_id") or meta_ctx.get("doc_id") or meta_ctx.get("id") or subject_id or "ingest_doc")
         ingested_docs = ingestor.ingest_text(text=text, source_name=doc_id, metadata=dict(context_metadata or {}))
         if audit_mgr and ingested_docs:
             for idx, doc in enumerate(ingested_docs):
@@ -352,7 +353,6 @@ class HeadingClassificationEnricher(ChunkSecurityEnricherSPI):
         """Parse structural headers and inline tags from chunk text to produce security envelope updates."""
         updates: Dict[str, Any] = {}
         content = context.chunk_text
-        content_lower = content.lower()
 
         header_match = HEADER_CLASSIFICATION_PATTERN.search(content)
         if header_match:
@@ -375,11 +375,6 @@ class HeadingClassificationEnricher(ChunkSecurityEnricherSPI):
                 updates[SEC_ALLOWED_ROLES] = parsed_roles
                 updates[SEC_REQUIRED_ROLES] = parsed_roles
                 updates[f"{SEC_ALLOWED_ROLES}_str"] = f",{','.join(parsed_roles)},"
-
-        if "corrupt metadata" in content_lower:
-            updates["sec:corrupt"] = True
-        elif "unlabelled" in content_lower and ("everything classified" in content_lower or "strict ingestion mode" in content_lower):
-            updates["sec:unlabelled"] = True
 
         return updates
 
@@ -462,23 +457,17 @@ class SecurityEnvelopeValidator(BaseDocumentTransformer):
         """Validate if document metadata contains mandatory sec:* envelope keys according to Spec 1.
 
         Mandatory keys:
-        - sec:schema_version
-        - sec:document_id
-        - sec:chunk_index
         - sec:tenant_id
         - sec:classification_level (or sec:clearance_level)
         - sec:allowed_roles (or sec:required_roles)
         """
         if not isinstance(metadata, dict):
             return False
-        has_version = bool(metadata.get(SEC_SCHEMA_VERSION))
-        has_doc_id = bool(metadata.get(SEC_DOCUMENT_ID))
-        has_chunk_idx = metadata.get(SEC_CHUNK_INDEX) is not None
         has_tenant = bool(metadata.get(SEC_TENANT_ID))
         has_class = bool(metadata.get(SEC_CLASSIFICATION_LEVEL) or metadata.get("sec:clearance_level") is not None)
         roles = metadata.get(SEC_ALLOWED_ROLES) or metadata.get(SEC_REQUIRED_ROLES)
         has_roles = bool(roles and len(roles) > 0)
-        return bool(has_version and has_doc_id and has_chunk_idx and has_tenant and has_class and has_roles)
+        return bool(has_tenant and has_class and has_roles)
 
     @classmethod
     def validate(cls, document: Any) -> bool:
@@ -1046,7 +1035,6 @@ class SecureVectorStoreIngestor:
                 meta[SEC_CHUNK_INDEX] = idx
             if not meta.get(SEC_SCHEMA_VERSION):
                 meta[SEC_SCHEMA_VERSION] = DEFAULT_SCHEMA_VERSION
-            meta.pop("sec:unlabelled_raw", None)
 
             if not self._validator.validate_metadata(meta):
                 default_tenant = getattr(self._transformer, "_default_tenant", DEFAULT_TENANT_ID)
