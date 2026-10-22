@@ -34,6 +34,9 @@ from security_core.pii import (
     set_pii_scope,
     reset_pii_scope,
     is_valid_luhn,
+    is_valid_verhoeff,
+    is_valid_aadhaar,
+    is_valid_pan,
 )
 from security_adapter_langchain.runnable_guard import SecureRunnable
 from security_adapter_langchain.tool_decorator import secured_tool
@@ -93,6 +96,55 @@ class TestPiiSanitizer(unittest.TestCase):
         self.assertFalse(is_valid_luhn("1234567890123456"))
         self.assertFalse(is_valid_luhn("12345"))
         self.assertFalse(is_valid_luhn("9999999999999999"))
+
+    def test_verhoeff_algorithm_validation(self):
+        # Valid numbers satisfying Verhoeff checksum
+        self.assertTrue(is_valid_verhoeff("367598346016"))
+        self.assertTrue(is_valid_verhoeff("999941057058"))
+        self.assertTrue(is_valid_verhoeff("987654321096"))
+        self.assertTrue(is_valid_verhoeff("234567890124"))
+        self.assertTrue(is_valid_verhoeff("2363"))
+
+        # Invalid numbers (checksum failure or empty)
+        self.assertFalse(is_valid_verhoeff("367598346012"))
+        self.assertFalse(is_valid_verhoeff("123456789012"))
+        self.assertFalse(is_valid_verhoeff("202610221046"))
+        self.assertFalse(is_valid_verhoeff(""))
+
+    def test_aadhaar_validation(self):
+        # Valid Aadhaar numbers (12 digits, starts with 2-9, valid Verhoeff)
+        self.assertTrue(is_valid_aadhaar("367598346016"))
+        self.assertTrue(is_valid_aadhaar("999941057058"))
+        self.assertTrue(is_valid_aadhaar("9999 4105 7058"))
+        self.assertTrue(is_valid_aadhaar("3675-9834-6016"))
+
+        # Invalid lengths
+        self.assertFalse(is_valid_aadhaar("12345"))
+        self.assertFalse(is_valid_aadhaar("3675983460161"))
+
+        # Disallowed starting digits (0 and 1)
+        self.assertFalse(is_valid_aadhaar("012345678901"))
+        self.assertFalse(is_valid_aadhaar("123456789012"))
+
+        # Checksum failure
+        self.assertFalse(is_valid_aadhaar("367598346012"))
+        self.assertFalse(is_valid_aadhaar("2345 6789 0123"))
+
+    def test_pan_validation(self):
+        # Valid Indian PAN structures (5 letters, 4 digits, 1 letter)
+        self.assertTrue(is_valid_pan("ABCDE1234F"))
+        self.assertTrue(is_valid_pan("abcde1234f"))
+        self.assertTrue(is_valid_pan("BNZPK1234K"))
+        self.assertTrue(is_valid_pan("ABCDE 1234 F"))
+        self.assertTrue(is_valid_pan("ABCDE-1234-F"))
+
+        # Invalid structures
+        self.assertFalse(is_valid_pan("ABCD1234F"))    # 4 letters only
+        self.assertFalse(is_valid_pan("ABCDEF1234"))   # 6 letters, no ending letter
+        self.assertFalse(is_valid_pan("12345ABCDE"))   # digits first
+        self.assertFalse(is_valid_pan("ABCDE12345"))   # digits at end
+        self.assertFalse(is_valid_pan("ABCDE123F"))     # 3 digits only
+
 
     def test_builtin_sanitizer_regex_entities(self):
         sanitizer = BuiltInPiiSanitizer()
@@ -190,6 +242,60 @@ class TestPiiSanitizer(unittest.TestCase):
         pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA04\n-----END RSA PRIVATE KEY-----"
         self.assertEqual(sanitizer.sanitize_text(f"Key data:\n{pem}", ctx), "Key data:\n[REDACTED]")
 
+        # 9. Indian Permanent Account Numbers (PAN)
+        self.assertEqual(
+            sanitizer.sanitize_text("Submitted PAN card BKRPK1234K for verification.", ctx),
+            "Submitted PAN card [REDACTED] for verification."
+        )
+        self.assertEqual(
+            sanitizer.sanitize_text("Alternative formats: ABCDE 1234 F and ALCPR-1234-Q.", ctx),
+            "Alternative formats: [REDACTED] and [REDACTED]."
+        )
+        self.assertEqual(
+            sanitizer.sanitize_text("Lowercase record: abcde1234f on file.", ctx),
+            "Lowercase record: [REDACTED] on file."
+        )
+
+        # 10. Indian Aadhaar Numbers
+        # Formatted with space / hyphen (Verhoeff checksum validated) -> Redacted
+        self.assertEqual(
+            sanitizer.sanitize_text("Resident Aadhaar: 9999 4105 7058 verified.", ctx),
+            "Resident Aadhaar: [REDACTED] verified."
+        )
+        self.assertEqual(
+            sanitizer.sanitize_text("Card UIDAI: 3675-9834-6016 linked to KYC.", ctx),
+            "Card UIDAI: [REDACTED] linked to KYC."
+        )
+        # Formatted without hint keyword, but valid Verhoeff -> Redacted
+        self.assertEqual(
+            sanitizer.sanitize_text("Identification sequence: 9999 4105 7058.", ctx),
+            "Identification sequence: [REDACTED]."
+        )
+        # Unformatted 12-digit number near Aadhaar hint keywords -> Redacted
+        self.assertEqual(
+            sanitizer.sanitize_text("Customer Aadhaar: 999941057058 on profile.", ctx),
+            "Customer Aadhaar: [REDACTED] on profile."
+        )
+        self.assertEqual(
+            sanitizer.sanitize_text("UID: 123456789012 entered in form.", ctx),
+            "UID: [REDACTED] entered in form."
+        )
+        # Formatted 12-digit number failing Verhoeff without hint -> Untouched
+        self.assertEqual(
+            sanitizer.sanitize_text("Tracking reference 2345 6789 0123 logged.", ctx),
+            "Tracking reference 2345 6789 0123 logged."
+        )
+        # Formatted 12-digit number starting with 1 without hint -> Untouched
+        self.assertEqual(
+            sanitizer.sanitize_text("Warehouse batch 1234 5678 9012 shipped.", ctx),
+            "Warehouse batch 1234 5678 9012 shipped."
+        )
+        # Unformatted 12-digit numbers without hint keywords -> Untouched
+        self.assertEqual(
+            sanitizer.sanitize_text("System event timestamp 202610221046 recorded.", ctx),
+            "System event timestamp 202610221046 recorded."
+        )
+
     def test_builtin_sanitizer_payload_masking(self):
         sanitizer = BuiltInPiiSanitizer()
         sanitizer.register_masked_field("custom_token_field")
@@ -199,11 +305,15 @@ class TestPiiSanitizer(unittest.TestCase):
             "email": "user@domain.com",
             "phone_number": "+1-555-555-5555",
             "dob": "1990-01-01",
+            "pan": "ABCDE1234F",
+            "aadhaar": "9999 4105 7058",
             "custom_token_field": "confidential_val",
             "normal_field": "Plain text note",
             "nested": {
                 "credit_card": "4111-1111-1111-1111",
                 "ssn": "000-12-3456",
+                "pan_card": "BKRPK1234K",
+                "aadhar": "3675-9834-6016",
                 "comment": "Reach me at support@helpdesk.org tomorrow.",
             },
         }
@@ -215,10 +325,14 @@ class TestPiiSanitizer(unittest.TestCase):
         self.assertEqual(cleaned["email"], "[REDACTED]")
         self.assertEqual(cleaned["phone_number"], "[REDACTED]")
         self.assertEqual(cleaned["dob"], "[REDACTED]")
+        self.assertEqual(cleaned["pan"], "[REDACTED]")
+        self.assertEqual(cleaned["aadhaar"], "[REDACTED]")
         self.assertEqual(cleaned["custom_token_field"], "[REDACTED]")
         self.assertEqual(cleaned["normal_field"], "Plain text note")
         self.assertEqual(cleaned["nested"]["credit_card"], "[REDACTED]")
         self.assertEqual(cleaned["nested"]["ssn"], "[REDACTED]")
+        self.assertEqual(cleaned["nested"]["pan_card"], "[REDACTED]")
+        self.assertEqual(cleaned["nested"]["aadhar"], "[REDACTED]")
         self.assertIn("[REDACTED]", cleaned["nested"]["comment"])
         self.assertNotIn("support@helpdesk.org", cleaned["nested"]["comment"])
 

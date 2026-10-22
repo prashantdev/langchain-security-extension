@@ -58,6 +58,9 @@ from security_core.pii import (
     set_pii_scope,
     reset_pii_scope,
     is_valid_luhn,
+    is_valid_verhoeff,
+    is_valid_aadhaar,
+    is_valid_pan,
 )
 
 __all__ = [
@@ -101,6 +104,9 @@ __all__ = [
     "set_pii_scope",
     "reset_pii_scope",
     "is_valid_luhn",
+    "is_valid_verhoeff",
+    "is_valid_aadhaar",
+    "is_valid_pan",
 ]
 
 

@@ -501,6 +501,15 @@ DEFAULT_SENSITIVE_FIELD_NAMES: tuple = (
     "cvv",
     "cvv2",
     "pan",
+    "pan_number",
+    "pan_card",
+    "aadhaar",
+    "aadhar",
+    "aadhaar_number",
+    "aadhar_number",
+    "aadhaar_card",
+    "aadhar_card",
+    "uidai",
     "email",
     "phone",
     "phone_number",
@@ -526,4 +535,17 @@ SSN_CONTEXT_WINDOW_CHARS: int = 40
 
 DEFAULT_SSN_HINT_PATTERN: str = r"(?i)\b(?:ssn|s\s*s\s*n|social\s+security\s+(?:number|no|#)?|social\s+sec\s*#?)\b"
 """Regex pattern for detecting SSN keywords near an unhyphenated 9-digit number."""
+
+AADHAAR_CONTEXT_WINDOW_CHARS: int = 40
+"""Character window before and after a candidate Aadhaar number checked for Aadhaar context keywords."""
+
+DEFAULT_AADHAAR_HINT_PATTERN: str = r"(?i)\b(?:aadhaar|aadhar|adhar|uidai|uid)\b"
+"""Regex pattern for detecting Aadhaar keywords near an unhyphenated or candidate 12-digit number."""
+
+PAN_CONTEXT_WINDOW_CHARS: int = 40
+"""Character window before and after a candidate PAN checked for PAN context keywords."""
+
+DEFAULT_PAN_HINT_PATTERN: str = r"(?i)\b(?:pan|permanent\s+account\s+number)\b"
+"""Regex pattern for detecting Indian PAN keywords near a candidate PAN."""
+
 

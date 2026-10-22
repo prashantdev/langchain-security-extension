@@ -30,12 +30,40 @@ from security_core.constants import (
     DEFAULT_PHONE_HINT_PATTERN,
     SSN_CONTEXT_WINDOW_CHARS,
     DEFAULT_SSN_HINT_PATTERN,
+    AADHAAR_CONTEXT_WINDOW_CHARS,
+    DEFAULT_AADHAAR_HINT_PATTERN,
+    PAN_CONTEXT_WINDOW_CHARS,
+    DEFAULT_PAN_HINT_PATTERN,
 )
 
 DEFAULT_MAX_CHARS: int = DEFAULT_PAYLOAD_MAX_CHARS
 DEFAULT_SCOPE: str = DEFAULT_PII_REDACTION_SCOPE
 REDACTED_TOKEN: str = DEFAULT_REDACTION_TOKEN
 TRUNCATED_SUFFIX: str = "...[TRUNCATED]"
+
+VERHOEFF_D_TABLE: Tuple[Tuple[int, ...], ...] = (
+    (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+    (1, 2, 3, 4, 0, 6, 7, 8, 9, 5),
+    (2, 3, 4, 0, 1, 7, 8, 9, 5, 6),
+    (3, 4, 0, 1, 2, 8, 9, 5, 6, 7),
+    (4, 0, 1, 2, 3, 9, 5, 6, 7, 8),
+    (5, 9, 8, 7, 6, 0, 4, 3, 2, 1),
+    (6, 5, 9, 8, 7, 1, 0, 4, 3, 2),
+    (7, 6, 5, 9, 8, 2, 1, 0, 4, 3),
+    (8, 7, 6, 5, 9, 3, 2, 1, 0, 4),
+    (9, 8, 7, 6, 5, 4, 3, 2, 1, 0),
+)
+
+VERHOEFF_P_TABLE: Tuple[Tuple[int, ...], ...] = (
+    (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+    (1, 5, 7, 6, 2, 8, 3, 0, 9, 4),
+    (5, 8, 0, 3, 7, 9, 6, 1, 4, 2),
+    (8, 9, 1, 6, 0, 4, 3, 5, 2, 7),
+    (9, 4, 5, 3, 1, 2, 6, 8, 7, 0),
+    (4, 2, 8, 6, 5, 7, 3, 9, 0, 1),
+    (2, 7, 9, 3, 8, 0, 6, 4, 1, 5),
+    (7, 0, 4, 6, 9, 1, 3, 2, 5, 8),
+)
 
 
 def is_valid_luhn(card_number_str: str) -> bool:
@@ -52,6 +80,40 @@ def is_valid_luhn(card_number_str: str) -> bool:
         else:
             checksum += digit
     return checksum % 10 == 0
+
+
+def is_valid_verhoeff(number_str: str) -> bool:
+    """Validate candidate identification number using the Verhoeff checksum algorithm."""
+    digits = [int(c) for c in number_str if c.isdigit()]
+    if not digits:
+        return False
+    checksum = 0
+    for i, digit in enumerate(reversed(digits)):
+        checksum = VERHOEFF_D_TABLE[checksum][VERHOEFF_P_TABLE[i % 8][digit]]
+    return checksum == 0
+
+
+def is_valid_aadhaar(aadhaar_str: str) -> bool:
+    """Validate candidate Indian Aadhaar number (12 digits, starts with 2-9, valid Verhoeff checksum)."""
+    digits = [c for c in aadhaar_str if c.isdigit()]
+    if len(digits) != 12:
+        return False
+    if digits[0] in ("0", "1"):
+        return False
+    return is_valid_verhoeff("".join(digits))
+
+
+def is_valid_pan(pan_str: str) -> bool:
+    """Validate candidate Indian PAN structure (5 letters, 4 digits, 1 letter)."""
+    stripped = pan_str.strip()
+    digits_part = [c for c in stripped if c.isdigit()]
+    alpha_part = [c for c in stripped if c.isalpha()]
+    if len(digits_part) != 4 or len(alpha_part) != 6:
+        return False
+    clean = re.sub(r"[-\s]", "", stripped)
+    if len(clean) != 10:
+        return False
+    return bool(re.match(r"^[A-Za-z]{5}\d{4}[A-Za-z]$", clean))
 
 
 class PiiContext:
@@ -157,14 +219,18 @@ class BuiltInPiiSanitizer(PiiSanitizerSPI):
         r'|(?P<private_key>-----BEGIN [A-Z\s]+ PRIVATE KEY-----[A-Za-z0-9+/=\s]+-----END [A-Z\s]+ PRIVATE KEY-----)'
         r'|(?P<email>\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,7}\b)'
         r'|(?P<ipv4>\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b)'
-        r'|(?P<ssn>\b\d{3}[-\s]\d{2}[-\s]\d{4}\b|\b\d{9}\b)'
+        r'|(?P<pan>\b[A-Za-z]{5}[-\s]?[0-9]{4}[-\s]?[A-Za-z]\b)'
         r'|(?P<card>\b(?:\d{4}[-\s]?){3}\d{1,7}\b|\b\d{13,19}\b)'
+        r'|(?P<aadhaar>(?<!\d)[2-9]\d{3}[-\s]\d{4}[-\s]\d{4}(?![-\s]?\d)|\b[2-9]\d{11}\b|(?<!\d)\d{4}[-\s]\d{4}[-\s]\d{4}(?![-\s]?\d)|\b\d{12}\b)'
+        r'|(?P<ssn>\b\d{3}[-\s]\d{2}[-\s]\d{4}\b|\b\d{9}\b)'
         r'|(?P<phone>(?:\+\d{1,3}[-.\s]?)?(?:\(\d{3}\)[-.\s]?|\b\d{3}[-.\s])\d{3}[-.\s]\d{4}\b|\b\d{10}\b)',
         re.IGNORECASE,
     )
 
     PHONE_HINT_REGEX = re.compile(DEFAULT_PHONE_HINT_PATTERN, re.IGNORECASE)
     SSN_HINT_REGEX = re.compile(DEFAULT_SSN_HINT_PATTERN, re.IGNORECASE)
+    AADHAAR_HINT_REGEX = re.compile(DEFAULT_AADHAAR_HINT_PATTERN, re.IGNORECASE)
+    PAN_HINT_REGEX = re.compile(DEFAULT_PAN_HINT_PATTERN, re.IGNORECASE)
 
 
     def __init__(self, *args: Any, **kwargs: Any):
@@ -209,6 +275,26 @@ class BuiltInPiiSanitizer(PiiSanitizerSPI):
             elif text.lower().startswith("bearer "):
                 return f"bearer {REDACTED_TOKEN}"
             return REDACTED_TOKEN
+
+        if group_dict.get("pan"):
+            if is_valid_pan(text):
+                return REDACTED_TOKEN
+            return text
+
+        if group_dict.get("aadhaar"):
+            digits = "".join(c for c in text if c.isdigit())
+            if len(digits) == 12:
+                start_idx = max(0, match.start() - AADHAAR_CONTEXT_WINDOW_CHARS)
+                end_idx = min(len(full_text), match.end() + AADHAAR_CONTEXT_WINDOW_CHARS)
+                window = full_text[start_idx:end_idx]
+                has_hint = bool(self.AADHAAR_HINT_REGEX.search(window))
+                if has_hint:
+                    return REDACTED_TOKEN
+                if is_valid_aadhaar(digits):
+                    if not any(c in text for c in "- "):
+                        return text
+                    return REDACTED_TOKEN
+            return text
 
         if group_dict.get("card"):
             digits = "".join(c for c in text if c.isdigit())
