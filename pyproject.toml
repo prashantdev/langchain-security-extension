@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "Enterprise RBAC and Attribute-Based Access Control (ABAC) security framework for LangChain and LangGraph AI applications."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
     { name = "LangChain Security Team" }
 ]
@@ -16,18 +17,25 @@ keywords = ["security", "langchain", "langgraph", "rbac", "abac", "ai-security",
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
     "typing-extensions>=4.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/prashantdev/langchain-security-extension"
+Documentation = "https://prashantdev.github.io/langchain-security-extension/"
+Repository = "https://github.com/prashantdev/langchain-security-extension.git"
+Issues = "https://github.com/prashantdev/langchain-security-extension/issues"
+Changelog = "https://github.com/prashantdev/langchain-security-extension/blob/master/CHANGELOG.md"
 
 [project.optional-dependencies]
 langchain = [
@@ -38,10 +46,17 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
 ]
+docs = [
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.24.0",
+]
+publish = [
+    "build>=1.0.0",
+    "twine>=5.0.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-security_core = ["py.typed"]
-security_adapter_langchain = ["py.typed"]
+"*" = ["py.typed"]
