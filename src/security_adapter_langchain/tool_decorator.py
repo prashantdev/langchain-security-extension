@@ -24,7 +24,18 @@ from security_core.pii import get_pii_sanitizer, get_pii_scope, PiiContext
 
 
 def get_tool_schema(tool: Any) -> Dict[str, Any]:
-    """Extract tool schema concealing internal security parameters from model context."""
+    """Extract tool schema concealing internal security parameters from model context.
+
+    Inspects tool function signatures or Pydantic `args_schema` and suppresses internal
+    security parameter names (e.g. security_identity, config, runnable_config) from being
+    exposed in model-facing JSON function schemas.
+
+    Args:
+        tool: Target tool callable, BaseTool instance, or structured tool function.
+
+    Returns:
+        Dict[str, Any]: Model-safe JSON Schema dictionary describing tool arguments.
+    """
     tool_name = getattr(tool, "name", None) or getattr(tool, "__name__", "tool")
     description = getattr(tool, "description", None) or getattr(tool, "__doc__", "") or ""
 
@@ -117,7 +128,20 @@ class SecuredToolConfig:
         *args: Any,
         **kwargs: Any,
     ):
-        """Factory method to construct SecuredToolConfig."""
+        """Factory method to construct SecuredToolConfig.
+
+        Args:
+            required_roles: List of mandatory role strings for execution.
+            min_clearance: Minimum clearance level rank required.
+            cel_expression: Common Expression Language condition string.
+            is_mutative: True if tool modifies system state.
+            pdp_engine: PDP decision engine instance.
+            *args: Optional positional arguments (masked_params).
+            **kwargs: Optional keyword arguments (masked_params).
+
+        Returns:
+            SecuredToolConfig: New tool security configuration instance.
+        """
         return cls(
             required_roles,
             min_clearance,

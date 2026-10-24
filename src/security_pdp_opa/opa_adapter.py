@@ -124,24 +124,37 @@ class RemotePDPAdapter(PolicyDecisionEngine):
         return self._decision_cache
 
     def register_invalidation_callback(self, callback: Any) -> None:
-        """Register a callback for cache invalidation events."""
+        """Register a callback for cache invalidation events.
+
+        Args:
+            callback: Callable invoked when cache invalidation events occur.
+        """
         callbacks = getattr(self, "_invalidation_callbacks", None)
         if callbacks is None:
             self._invalidation_callbacks = []
         self._invalidation_callbacks.append(callback)
 
     def clear_cache(self) -> None:
-        """Flush decision cache."""
+        """Flush and clear all cached policy decisions in the decision cache."""
         self.invalidate_cache()
 
     def evict_subject_cache(self, subject_id: str, *args: Any, **kwargs: Any) -> int:
-        """Evict cached decisions for a specific subject."""
+        """Evict cached decisions for a specific subject identifier.
+
+        Args:
+            subject_id: Subject identifier whose cached decisions should be purged.
+            *args: Optional positional arguments.
+            **kwargs: Optional keyword arguments.
+
+        Returns:
+            int: Number of evicted cache entries.
+        """
         if self._decision_cache:
             return self._decision_cache.evict_subject(subject_id, *args, **kwargs)
         return 0
 
     def invalidate_cache(self) -> None:
-        """Flushes cross-request static PDP decision cache upon OPA policy bundle reload."""
+        """Flush cross-request static PDP decision cache upon OPA policy bundle reload."""
         if self._decision_cache:
             self._decision_cache.flush()
 
@@ -350,7 +363,14 @@ class OPACacheInvalidationHandler:
         return True
 
     def on_invalidation_event(self, payload: Dict[str, Any]) -> int:
-        """Handles identity or policy invalidation event and evicts subject or full PDP cache."""
+        """Handles identity or policy invalidation event and evicts subject or full PDP cache.
+
+        Args:
+            payload: Event payload containing subject identifier or invalidation metadata.
+
+        Returns:
+            int: Number of cache entries evicted, or 0 if a full flush was triggered.
+        """
         subject_id = payload.get("subject_id") or payload.get("email")
         if subject_id and self._remote_adapter and hasattr(self._remote_adapter, "evict_subject_cache"):
             return int(self._remote_adapter.evict_subject_cache(str(subject_id)))

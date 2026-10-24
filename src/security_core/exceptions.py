@@ -289,6 +289,7 @@ class PromptInjectionDetectedException(SecurityAuthorizationError):
 
 
 SecurityValidationException = IngestionRejectedException
+"""Alias for IngestionRejectedException for specification naming compatibility."""
 
 
 

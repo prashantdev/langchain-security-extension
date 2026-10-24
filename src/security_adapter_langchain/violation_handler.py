@@ -61,6 +61,19 @@ class ViolationResolution:
         diagnostic_reason: Optional[str],
         tool_name: Optional[str],
     ):
+        """Initialize ViolationResolution.
+
+        Args:
+            status: Overall final status token (e.g. BLOCKED_BY_POLICY, ACCESS_DENIED).
+            action_entry: Telemetry log entry action description.
+            root_cause: Diagnostic root cause classification.
+            user_message: Sanitized explanation suitable for end-user.
+            policy_decision: Policy evaluation verdict token (e.g. BLOCKED_POLICY, FEEDBACK_REFUSAL).
+            execution_action: Runtime execution action (e.g. ABORTED, SYNTHETIC_PAYLOAD).
+            should_abort: True if agent loop execution must abort immediately.
+            diagnostic_reason: Detailed diagnostic reason code.
+            tool_name: Name of target tool associated with violation.
+        """
         self._status = status
         self._action_entry = action_entry
         self._root_cause = root_cause
@@ -73,6 +86,15 @@ class ViolationResolution:
 
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> "ViolationResolution":
+        """Factory method to construct ViolationResolution.
+
+        Args:
+            *args: Optional positional arguments (status, action_entry, root_cause, user_message, policy_decision, execution_action, should_abort, diagnostic_reason, tool_name).
+            **kwargs: Optional keyword arguments.
+
+        Returns:
+            ViolationResolution: Constructed structured resolution object.
+        """
         status = str(kwargs.get("status", args[0] if len(args) > 0 else ""))
         action_entry = str(kwargs.get("action_entry", args[1] if len(args) > 1 else ""))
         root_cause = str(kwargs.get("root_cause", args[2] if len(args) > 2 else ""))
@@ -96,26 +118,32 @@ class ViolationResolution:
 
     @property
     def status(self) -> str:
+        """Get overall violation status token."""
         return self._status
 
     @property
     def action_entry(self) -> str:
+        """Get log action description."""
         return self._action_entry
 
     @property
     def root_cause(self) -> str:
+        """Get diagnostic root cause token."""
         return self._root_cause
 
     @property
     def user_message(self) -> str:
+        """Get sanitized user-facing error message."""
         return self._user_message
 
     @property
     def policy_decision(self) -> str:
+        """Get policy evaluation decision verdict token."""
         return self._policy_decision
 
     @property
     def execution_action(self) -> str:
+        """Get runtime execution remediation action."""
         return self._execution_action
 
     @property
@@ -130,14 +158,17 @@ class ViolationResolution:
 
     @property
     def should_abort(self) -> bool:
+        """Check whether the agent execution loop should abort immediately."""
         return self._should_abort
 
     @property
     def diagnostic_reason(self) -> Optional[str]:
+        """Get detailed diagnostic reason code."""
         return self._diagnostic_reason
 
     @property
     def tool_name(self) -> Optional[str]:
+        """Get name of tool associated with violation, if applicable."""
         return self._tool_name
 
 
@@ -145,22 +176,52 @@ class RetryBudgetTracker:
     """Invocation-scoped retry budget tracker preventing recursive LLM retry loops."""
 
     def __init__(self, max_feedback_violations: int):
+        """Initialize RetryBudgetTracker.
+
+        Args:
+            max_feedback_violations: Maximum feedback violation retry allowance before escalating to hard abort.
+        """
         self._max_feedback_violations = max_feedback_violations
 
     @classmethod
     def create(cls, max_feedback_violations: int) -> "RetryBudgetTracker":
+        """Factory method to construct RetryBudgetTracker.
+
+        Args:
+            max_feedback_violations: Maximum retry threshold integer.
+
+        Returns:
+            RetryBudgetTracker: Configured tracker instance.
+        """
         return cls(max_feedback_violations=max_feedback_violations)
 
     @property
     def max_feedback_violations(self) -> int:
+        """Get maximum feedback violation retry allowance."""
         return self._max_feedback_violations
 
     def get_retry_count(self, config: Optional[Dict[str, Any]]) -> int:
+        """Retrieve the current retry violation count from invocation configuration.
+
+        Args:
+            config: RunnableConfig dictionary containing configurable metadata.
+
+        Returns:
+            int: Current integer retry count.
+        """
         if isinstance(config, dict) and isinstance(config.get("configurable"), dict):
             return int(config["configurable"].get(CONFIG_RETRY_COUNT_KEY, 0))
         return 0
 
     def increment_retry_count(self, config: Optional[Dict[str, Any]]) -> int:
+        """Increment and persist the retry count inside the invocation configuration.
+
+        Args:
+            config: Target RunnableConfig dictionary.
+
+        Returns:
+            int: Newly updated retry count integer.
+        """
         if isinstance(config, dict) and isinstance(config.get("configurable"), dict):
             count = int(config["configurable"].get(CONFIG_RETRY_COUNT_KEY, 0)) + 1
             config["configurable"][CONFIG_RETRY_COUNT_KEY] = count
@@ -168,9 +229,22 @@ class RetryBudgetTracker:
         return 0
 
     def is_budget_exceeded(self, config: Optional[Dict[str, Any]]) -> bool:
+        """Check if invocation-scoped retries have exceeded the maximum feedback limit.
+
+        Args:
+            config: Target RunnableConfig dictionary.
+
+        Returns:
+            bool: True if retry budget is exhausted, False otherwise.
+        """
         return self.get_retry_count(config) > self._max_feedback_violations
 
     def reset(self, config: Optional[Dict[str, Any]]) -> None:
+        """Reset the invocation retry counter to zero.
+
+        Args:
+            config: Target RunnableConfig dictionary.
+        """
         if isinstance(config, dict) and isinstance(config.get("configurable"), dict):
             config["configurable"][CONFIG_RETRY_COUNT_KEY] = 0
 
@@ -179,20 +253,37 @@ class AbuseThrottleTracker:
     """Sliding-window abuse throttle tracker detecting rapid cross-invocation denial floods."""
 
     def __init__(self, window_seconds: float, max_denials: int):
+        """Initialize AbuseThrottleTracker.
+
+        Args:
+            window_seconds: Duration of sliding evaluation window in seconds.
+            max_denials: Maximum allowed denial events within window before throttling.
+        """
         self._window_seconds = window_seconds
         self._max_denials = max_denials
         self._denial_history: Dict[str, List[float]] = {}
 
     @classmethod
     def create(cls, window_seconds: float, max_denials: int) -> "AbuseThrottleTracker":
+        """Factory method to construct AbuseThrottleTracker.
+
+        Args:
+            window_seconds: Window duration in seconds.
+            max_denials: Threshold count of denials.
+
+        Returns:
+            AbuseThrottleTracker: Configured tracker instance.
+        """
         return cls(window_seconds=window_seconds, max_denials=max_denials)
 
     @property
     def window_seconds(self) -> float:
+        """Get sliding window duration in seconds."""
         return self._window_seconds
 
     @property
     def max_denials(self) -> int:
+        """Get maximum allowed denials threshold."""
         return self._max_denials
 
     def _prune(self, subject_id: str, current_time: float) -> List[float]:
@@ -202,17 +293,40 @@ class AbuseThrottleTracker:
         return timestamps
 
     def record_denial(self, subject_id: str, timestamp: float) -> bool:
+        """Record a denial occurrence for a subject and check if abuse threshold is breached.
+
+        Args:
+            subject_id: Subject identifier.
+            timestamp: Epoch timestamp in seconds.
+
+        Returns:
+            bool: True if subject exceeds abuse threshold (is abusing), False otherwise.
+        """
         timestamps = self._prune(subject_id, timestamp)
         timestamps.append(timestamp)
         self._denial_history[subject_id] = timestamps
         return len(timestamps) >= self._max_denials
 
     def is_throttled(self, subject_id: str, timestamp: float) -> bool:
+        """Check if subject is currently throttled due to recent denial density.
+
+        Args:
+            subject_id: Subject identifier.
+            timestamp: Epoch timestamp in seconds.
+
+        Returns:
+            bool: True if subject is throttled, False otherwise.
+        """
         timestamps = self._prune(subject_id, timestamp)
         return len(timestamps) >= self._max_denials
 
     def reset(self, *args: Any, **kwargs: Any) -> None:
-        """Reset denial history for a subject or all subjects."""
+        """Reset denial history for a specific subject or all subjects.
+
+        Args:
+            *args: Optional positional subject_id.
+            **kwargs: Optional keyword subject_id.
+        """
         subject_id = args[0] if len(args) > 0 else kwargs.get("subject_id")
         if subject_id is not None:
             self._denial_history.pop(str(subject_id), None)
@@ -229,6 +343,13 @@ class ToolViolationHandler:
         retry_tracker: RetryBudgetTracker,
         abuse_tracker: AbuseThrottleTracker,
     ):
+        """Initialize ToolViolationHandler.
+
+        Args:
+            pdp_engine: PDP decision engine for evaluating and logging violations.
+            retry_tracker: RetryBudgetTracker instance.
+            abuse_tracker: AbuseThrottleTracker instance.
+        """
         self._pdp_engine = pdp_engine
         self._retry_tracker = retry_tracker
         self._abuse_tracker = abuse_tracker
@@ -236,7 +357,12 @@ class ToolViolationHandler:
             self._pdp_engine.register_invalidation_callback(self.reset_abuse)
 
     def reset_abuse(self, *args: Any, **kwargs: Any) -> None:
-        """Reset abuse tracking for subject or all subjects."""
+        """Reset abuse tracking for a specific subject or all subjects.
+
+        Args:
+            *args: Optional positional subject_id.
+            **kwargs: Optional keyword subject_id.
+        """
         self._abuse_tracker.reset(*args, **kwargs)
 
     @classmethod
@@ -246,6 +372,16 @@ class ToolViolationHandler:
         retry_tracker: RetryBudgetTracker,
         abuse_tracker: AbuseThrottleTracker,
     ) -> "ToolViolationHandler":
+        """Factory method constructing a ToolViolationHandler.
+
+        Args:
+            pdp_engine: PDP decision engine.
+            retry_tracker: Tracker for model feedback retries.
+            abuse_tracker: Tracker for subject-level abuse denial bursts.
+
+        Returns:
+            ToolViolationHandler: New handler instance.
+        """
         return cls(
             pdp_engine=pdp_engine,
             retry_tracker=retry_tracker,
@@ -254,6 +390,14 @@ class ToolViolationHandler:
 
     @classmethod
     def default_handler(cls, pdp_engine: PolicyDecisionEngine) -> "ToolViolationHandler":
+        """Factory method constructing default handler with standard limits.
+
+        Args:
+            pdp_engine: PDP decision engine instance.
+
+        Returns:
+            ToolViolationHandler: Handler initialized with standard 2-retry budget and 60s sliding abuse window.
+        """
         retry_tracker = RetryBudgetTracker.create(max_feedback_violations=DEFAULT_MAX_FEEDBACK_VIOLATIONS)
         abuse_tracker = AbuseThrottleTracker.create(
             window_seconds=DEFAULT_ABUSE_WINDOW_SECONDS,
@@ -267,14 +411,17 @@ class ToolViolationHandler:
 
     @property
     def pdp_engine(self) -> PolicyDecisionEngine:
+        """Get the bound PolicyDecisionEngine."""
         return self._pdp_engine
 
     @property
     def retry_tracker(self) -> RetryBudgetTracker:
+        """Get the bound RetryBudgetTracker."""
         return self._retry_tracker
 
     @property
     def abuse_tracker(self) -> AbuseThrottleTracker:
+        """Get the bound AbuseThrottleTracker."""
         return self._abuse_tracker
 
     def record_tool_violation(
@@ -285,7 +432,18 @@ class ToolViolationHandler:
         config: Optional[Dict[str, Any]],
         caller_identity: Optional[SecurityIdentity],
     ) -> ViolationResolution:
-        """Records a tool policy violation, tracks abuse/retries, and returns structured resolution."""
+        """Record a tool policy violation, tracks abuse/retries, and returns structured resolution.
+
+        Args:
+            tool_name: Name of tool whose execution was denied.
+            diagnostic_reason: Diagnostic reason string from PDP decision.
+            is_mutative: True if tool modifies system state, triggering immediate hard abort.
+            config: Optional RunnableConfig dictionary for tracking state and retry counts.
+            caller_identity: Optional SecurityIdentity envelope of calling subject.
+
+        Returns:
+            ViolationResolution: Structured resolution detailing telemetry, status, and abort flags.
+        """
         is_budget_exceeded = self._retry_tracker.is_budget_exceeded(config)
         is_abusing = False
 
@@ -371,6 +529,15 @@ class ToolViolationHandler:
         exc: Exception,
         config: Optional[Dict[str, Any]],
     ) -> ViolationResolution:
+        """Resolve an uncaught tool exception into a structured ViolationResolution.
+
+        Args:
+            exc: Exception raised during tool execution.
+            config: Optional RunnableConfig dictionary.
+
+        Returns:
+            ViolationResolution: Structured violation resolution object.
+        """
         tool_name = getattr(exc, "tool_name", "unknown_tool")
         diagnostic_reason = getattr(exc, "diagnostic_reason", None) or str(exc)
         caller_identity = IdentityBridge.extract_from_config(config)

@@ -346,11 +346,22 @@ class HeadingClassificationEnricher(ChunkSecurityEnricherSPI):
 
     @classmethod
     def create(cls) -> "HeadingClassificationEnricher":
-        """Construct a HeadingClassificationEnricher instance."""
+        """Construct a HeadingClassificationEnricher instance.
+
+        Returns:
+            HeadingClassificationEnricher: New enricher instance.
+        """
         return cls()
 
     def enrich(self, context: ChunkEnrichmentContext) -> Dict[str, Any]:
-        """Parse structural headers and inline tags from chunk text to produce security envelope updates."""
+        """Parse structural headers and inline tags from chunk text to produce security envelope updates.
+
+        Args:
+            context: ChunkEnrichmentContext providing chunk text and metadata.
+
+        Returns:
+            Dict[str, Any]: Security envelope updates parsed from headings and inline tags.
+        """
         updates: Dict[str, Any] = {}
         content = context.chunk_text
 
@@ -384,11 +395,22 @@ class DlpSecretDetectionEnricher(ChunkSecurityEnricherSPI):
 
     @classmethod
     def create(cls) -> "DlpSecretDetectionEnricher":
-        """Construct a DlpSecretDetectionEnricher instance."""
+        """Construct a DlpSecretDetectionEnricher instance.
+
+        Returns:
+            DlpSecretDetectionEnricher: New DLP enricher instance.
+        """
         return cls()
 
     def enrich(self, context: ChunkEnrichmentContext) -> Dict[str, Any]:
-        """Scan chunk text for DLP patterns and elevate to RESTRICTED if detected."""
+        """Scan chunk text for DLP patterns and elevate to RESTRICTED if detected.
+
+        Args:
+            context: ChunkEnrichmentContext providing chunk text and metadata.
+
+        Returns:
+            Dict[str, Any]: Security envelope updates if secrets/PII are detected, or empty dict.
+        """
         content = context.chunk_text
         for pattern in DLP_SECRET_PATTERNS:
             if pattern.search(content):
@@ -565,7 +587,15 @@ class DocumentSecurityTransformer(BaseDocumentTransformer):
         *args: Any,
         **kwargs: Any,
     ) -> "DocumentSecurityTransformer":
-        """Factory method to construct DocumentSecurityTransformer."""
+        """Factory method to construct DocumentSecurityTransformer.
+
+        Args:
+            *args: Optional positional arguments (default_classification, default_roles, default_tenant, default_department, rules).
+            **kwargs: Optional keyword arguments (default_classification, default_roles, default_tenant, default_department, rules).
+
+        Returns:
+            DocumentSecurityTransformer: Configured document transformer instance.
+        """
         return cls(*args, **kwargs)
 
     @classmethod
@@ -677,7 +707,15 @@ class SecureTextSplitter(BaseDocumentTransformer):
 
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> "SecureTextSplitter":
-        """Factory method constructing SecureTextSplitter."""
+        """Factory method constructing SecureTextSplitter.
+
+        Args:
+            *args: Optional positional arguments (chunk_size, chunk_overlap, separators).
+            **kwargs: Optional keyword arguments (chunk_size, chunk_overlap, separators).
+
+        Returns:
+            SecureTextSplitter: Newly constructed text splitter instance.
+        """
         return cls(*args, **kwargs)
 
     @classmethod
@@ -929,7 +967,14 @@ class SecureDocumentChunkEnricher(BaseDocumentTransformer):
             ))
 
     def enrich(self, document: Any) -> Any:
-        """Enrich a single document chunk."""
+        """Enrich a single document chunk.
+
+        Args:
+            document: Document object or SecureDocument to enrich.
+
+        Returns:
+            Any: Enriched document instance with monotonic clearance and metadata tags.
+        """
         return self.transform_documents([document])[0]
 
     def transform_documents(self, documents: Sequence[Any], **kwargs: Any) -> Sequence[Any]:
@@ -987,7 +1032,12 @@ class SecureVectorStoreIngestor:
     """Stage 5 Ingestion orchestrator chunking raw content, enriching with sec:* metadata, and validating modes."""
 
     def __init__(self, *args: Any, **kwargs: Any):
-        """Initialize SecureVectorStoreIngestor."""
+        """Initialize SecureVectorStoreIngestor.
+
+        Args:
+            *args: Positional arguments (transformer, enricher, validator, ingestion_mode, text_splitter, audit_manager).
+            **kwargs: Keyword arguments (transformer, enricher, validator, ingestion_mode, text_splitter, audit_manager).
+        """
         transformer = kwargs.get("transformer", args[0] if len(args) > 0 else None)
         enricher = kwargs.get("enricher", args[1] if len(args) > 1 else None)
         validator = kwargs.get("validator", args[2] if len(args) > 2 else None)
@@ -1008,7 +1058,15 @@ class SecureVectorStoreIngestor:
         *args: Any,
         **kwargs: Any,
     ) -> "SecureVectorStoreIngestor":
-        """Factory method constructing SecureVectorStoreIngestor."""
+        """Factory method constructing SecureVectorStoreIngestor.
+
+        Args:
+            *args: Positional arguments (transformer, enricher, validator, ingestion_mode, text_splitter, audit_manager).
+            **kwargs: Keyword arguments (transformer, enricher, validator, ingestion_mode, text_splitter, audit_manager).
+
+        Returns:
+            SecureVectorStoreIngestor: Newly constructed ingestor orchestrator.
+        """
         return cls(*args, **kwargs)
 
     @classmethod

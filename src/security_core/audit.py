@@ -94,7 +94,34 @@ class AuditEvent:
         sequence_number: int = 0,
         envelope_hmac: Optional[str] = None,
     ):
-        """Initialize AuditEvent."""
+        """Initialize AuditEvent.
+
+        Args:
+            event_id: Unique UUID string for event identification.
+            schema_version: Audit schema version string.
+            timestamp_utc: UTC timestamp in seconds since epoch.
+            invocation_id: Unique trace context or invocation ID.
+            trace_id: OpenTelemetry trace ID if present.
+            span_id: OpenTelemetry span ID if present.
+            subject_id: Caller subject identifier.
+            tenant_id: Multi-tenant boundary identifier.
+            subject_roles: Roles assigned to caller.
+            subject_clearance: Clearance rank assigned to caller.
+            enforcement_point: Enforcement point identifier.
+            action: Requested action identifier.
+            target_resource: Target resource path or name.
+            decision: PDP decision verdict.
+            reason_code: Standardized security event reason code.
+            diagnostic_reason: Human-readable diagnostic description.
+            severity: Event severity level.
+            payload_snapshot: Sanitized payload snapshot dictionary.
+            threat_category: Optional threat classification category.
+            threat_score: Optional threat confidence score.
+            detected_pattern: Optional injection pattern identifier.
+            mitigation_action: Optional mitigation strategy applied.
+            sequence_number: Monotonic audit sequence number.
+            envelope_hmac: Optional HMAC signature for tamper evidence.
+        """
         self.event_id = event_id
         self.schema_version = schema_version
         self.timestamp_utc = timestamp_utc
@@ -241,7 +268,15 @@ class AuditSanitizer:
 
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> "AuditSanitizer":
-        """Construct an AuditSanitizer and register any provided masked_fields."""
+        """Construct an AuditSanitizer and register any provided masked_fields.
+
+        Args:
+            *args: Optional positional arguments (masked_fields).
+            **kwargs: Optional keyword arguments (masked_fields).
+
+        Returns:
+            AuditSanitizer: New sanitizer wrapper instance.
+        """
         sanitizer = get_pii_sanitizer()
         masked_fields = kwargs.get("masked_fields", args[0] if len(args) > 0 else None)
         if masked_fields and hasattr(sanitizer, "register_masked_field"):
@@ -251,14 +286,25 @@ class AuditSanitizer:
 
     @classmethod
     def register_masked_field(cls, field_name: str) -> None:
-        """Stage 1: Register a parameter or field name for automatic @Masked annotation redaction."""
+        """Stage 1: Register a parameter or field name for automatic @Masked annotation redaction.
+
+        Args:
+            field_name: Parameter or field name to register for dictionary masking.
+        """
         sanitizer = get_pii_sanitizer()
         if hasattr(sanitizer, "register_masked_field"):
             sanitizer.register_masked_field(field_name)
 
     @classmethod
     def is_masked_field(cls, field_name: str) -> bool:
-        """Check if a field name is marked as sensitive/masked."""
+        """Check if a field name is marked as sensitive/masked.
+
+        Args:
+            field_name: Parameter or field name to check.
+
+        Returns:
+            bool: True if field is registered for masking, False otherwise.
+        """
         sanitizer = get_pii_sanitizer()
         if hasattr(sanitizer, "is_masked_field"):
             return sanitizer.is_masked_field(field_name)
@@ -266,14 +312,31 @@ class AuditSanitizer:
 
     @classmethod
     def sanitize_string(cls, value: str, max_chars: int) -> str:
-        """Apply Stage 2 regex scrubbing and Stage 3 truncation to a string value."""
+        """Apply Stage 2 regex scrubbing and Stage 3 truncation to a string value.
+
+        Args:
+            value: Input string to sanitize.
+            max_chars: Character length cap before applying truncation suffix.
+
+        Returns:
+            str: Sanitized and optionally truncated string.
+        """
         sanitizer = get_pii_sanitizer()
         context = PiiContext.create(PII_STAGE_AUDIT_PAYLOAD, None, None, None, None)
         return sanitizer.sanitize_text(value, context, max_chars)
 
     @classmethod
     def sanitize_payload(cls, payload: Dict[str, Any], *args: Any, **kwargs: Any) -> Dict[str, Any]:
-        """Scrub secrets, PII, @Masked fields, and truncate oversized strings from payload dictionary."""
+        """Scrub secrets, PII, @Masked fields, and truncate oversized strings from payload dictionary.
+
+        Args:
+            payload: Input dictionary containing audit event data or telemetry.
+            *args: Optional positional arguments (max_chars, masked_fields).
+            **kwargs: Optional keyword arguments (max_chars, masked_fields).
+
+        Returns:
+            Dict[str, Any]: Sanitized dictionary payload.
+        """
         sanitizer = get_pii_sanitizer()
         context = PiiContext.create(PII_STAGE_AUDIT_PAYLOAD, None, None, None, None)
         return sanitizer.sanitize_payload(payload, context, *args, **kwargs)
@@ -490,7 +553,13 @@ class AuditManager:
     """Central manager for non-blocking asynchronous audit event dispatch and ring buffer management."""
 
     def __init__(self, publishers: List[AuditPublisherSPI], *args: Any, **kwargs: Any):
-        """Initialize AuditManager."""
+        """Initialize AuditManager.
+
+        Args:
+            publishers: List of AuditPublisherSPI publisher implementations.
+            *args: Optional positional arguments (capacity).
+            **kwargs: Optional keyword arguments (capacity).
+        """
         capacity = int(kwargs.get("capacity", args[0] if len(args) > 0 else DEFAULT_RING_BUFFER_CAPACITY))
         self._publishers = list(publishers)
         self._capacity = capacity
@@ -509,7 +578,16 @@ class AuditManager:
 
     @classmethod
     def create(cls, publishers: List[AuditPublisherSPI], *args: Any, **kwargs: Any):
-        """Factory method to construct AuditManager."""
+        """Factory method to construct AuditManager.
+
+        Args:
+            publishers: List of AuditPublisherSPI publisher implementations.
+            *args: Optional positional arguments (capacity).
+            **kwargs: Optional keyword arguments (capacity).
+
+        Returns:
+            AuditManager: Initialized manager instance with background async worker thread.
+        """
         capacity = int(kwargs.get("capacity", args[0] if len(args) > 0 else DEFAULT_RING_BUFFER_CAPACITY))
         return cls(publishers=publishers, capacity=capacity)
 
@@ -556,7 +634,11 @@ class AuditManager:
                     pass
 
     def record_event(self, event: AuditEvent) -> None:
-        """Execute in-flight sanitization and non-blocking dispatch to ring buffer."""
+        """Execute in-flight sanitization and non-blocking dispatch to ring buffer.
+
+        Args:
+            event: AuditEvent instance to sanitize and record.
+        """
         if get_pii_scope() != PII_SCOPE_DISABLED:
             ctx = PiiContext.create(
                 PII_STAGE_AUDIT_PAYLOAD,

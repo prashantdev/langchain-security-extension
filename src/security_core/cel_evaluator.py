@@ -91,7 +91,19 @@ class CELEvaluator:
         *extra_args: Any,
         **kwargs: Any,
     ) -> bool:
-        """Evaluate a CEL parameter constraint expression against invocation context."""
+        """Evaluate a CEL parameter constraint expression against invocation context.
+
+        Args:
+            expression: Common Expression Language (CEL) boolean condition string.
+            subject: SecurityIdentity envelope of the calling user or agent.
+            args: Map of resolved runtime argument parameters passed to the tool.
+            tool: Metadata attributes dictionary describing the target tool.
+            *extra_args: Optional positional arguments (e.g., config dictionary).
+            **kwargs: Optional keyword arguments (e.g., config dictionary).
+
+        Returns:
+            bool: True if the expression evaluates to truthy; False on failure or syntax error (fail-closed).
+        """
         self._last_diagnostic_reason = None
         self._last_hydrated_entities = {}
         if not expression or not expression.strip():

@@ -67,7 +67,14 @@ VERHOEFF_P_TABLE: Tuple[Tuple[int, ...], ...] = (
 
 
 def is_valid_luhn(card_number_str: str) -> bool:
-    """Validate candidate credit/debit card number using the Luhn checksum algorithm."""
+    """Validate candidate credit/debit card number using the Luhn checksum algorithm.
+
+    Args:
+        card_number_str: String containing card number digits with optional delimiters.
+
+    Returns:
+        bool: True if digits satisfy the Luhn mod-10 formula, False otherwise.
+    """
     digits = [int(c) for c in card_number_str if c.isdigit()]
     if len(digits) < 13 or len(digits) > 19:
         return False
@@ -83,7 +90,14 @@ def is_valid_luhn(card_number_str: str) -> bool:
 
 
 def is_valid_verhoeff(number_str: str) -> bool:
-    """Validate candidate identification number using the Verhoeff checksum algorithm."""
+    """Validate candidate identification number using the Verhoeff checksum algorithm.
+
+    Args:
+        number_str: Numeric string to validate against dihedral group D5 permutations.
+
+    Returns:
+        bool: True if the Verhoeff checksum digit is valid, False otherwise.
+    """
     digits = [int(c) for c in number_str if c.isdigit()]
     if not digits:
         return False
@@ -94,7 +108,14 @@ def is_valid_verhoeff(number_str: str) -> bool:
 
 
 def is_valid_aadhaar(aadhaar_str: str) -> bool:
-    """Validate candidate Indian Aadhaar number (12 digits, starts with 2-9, valid Verhoeff checksum)."""
+    """Validate candidate Indian Aadhaar number (12 digits, starts with 2-9, valid Verhoeff checksum).
+
+    Args:
+        aadhaar_str: Candidate Aadhaar number string with optional spaces or hyphens.
+
+    Returns:
+        bool: True if length is 12, first digit is 2-9, and Verhoeff checksum succeeds; False otherwise.
+    """
     digits = [c for c in aadhaar_str if c.isdigit()]
     if len(digits) != 12:
         return False
@@ -104,7 +125,14 @@ def is_valid_aadhaar(aadhaar_str: str) -> bool:
 
 
 def is_valid_pan(pan_str: str) -> bool:
-    """Validate candidate Indian PAN structure (5 letters, 4 digits, 1 letter)."""
+    """Validate candidate Indian PAN structure (5 letters, 4 digits, 1 letter).
+
+    Args:
+        pan_str: Candidate Permanent Account Number string.
+
+    Returns:
+        bool: True if matching the standard 10-character alphanumeric PAN format, False otherwise.
+    """
     stripped = pan_str.strip()
     digits_part = [c for c in stripped if c.isdigit()]
     alpha_part = [c for c in stripped if c.isalpha()]
@@ -127,6 +155,15 @@ class PiiContext:
         resource_id: Optional[str],
         metadata: Optional[Dict[str, Any]],
     ):
+        """Initialize PiiContext.
+
+        Args:
+            stage: Execution lifecycle stage identifier (e.g. audit_payload, tool_argument, outbound_response).
+            tenant_id: Tenant isolation identifier associated with the request.
+            subject_id: Subject identifier of the caller or initiator.
+            resource_id: Identifier of the target resource, tool, or document.
+            metadata: Additional contextual metadata dictionary.
+        """
         self.stage = stage
         self.tenant_id = tenant_id
         self.subject_id = subject_id
@@ -234,6 +271,12 @@ class BuiltInPiiSanitizer(PiiSanitizerSPI):
 
 
     def __init__(self, *args: Any, **kwargs: Any):
+        """Initialize BuiltInPiiSanitizer.
+
+        Args:
+            *args: Optional positional arguments (masked_fields).
+            **kwargs: Optional keyword arguments (masked_fields).
+        """
         masked_fields = kwargs.get("masked_fields", args[0] if len(args) > 0 else ())
         self._registered_masked_fields: Set[str] = {
             str(f).lower().strip() for f in DEFAULT_SENSITIVE_FIELD_NAMES
@@ -244,16 +287,35 @@ class BuiltInPiiSanitizer(PiiSanitizerSPI):
 
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> "BuiltInPiiSanitizer":
-        """Factory method to construct a BuiltInPiiSanitizer."""
+        """Factory method to construct a BuiltInPiiSanitizer.
+
+        Args:
+            *args: Optional positional arguments (masked_fields).
+            **kwargs: Optional keyword arguments (masked_fields).
+
+        Returns:
+            BuiltInPiiSanitizer: Configured sanitizer instance.
+        """
         return cls(*args, **kwargs)
 
     def register_masked_field(self, field_name: str) -> None:
-        """Register a parameter or field name for automatic Stage 1 dictionary masking."""
+        """Register a parameter or field name for automatic Stage 1 dictionary masking.
+
+        Args:
+            field_name: Name of field or argument to redact when encountered in dictionaries.
+        """
         if field_name:
             self._registered_masked_fields.add(field_name.lower().strip())
 
     def is_masked_field(self, field_name: str) -> bool:
-        """Check if a field name is marked as sensitive/masked."""
+        """Check if a field name is marked as sensitive/masked.
+
+        Args:
+            field_name: Field name to query.
+
+        Returns:
+            bool: True if the field is registered as sensitive/masked, False otherwise.
+        """
         return bool(field_name and field_name.lower().strip() in self._registered_masked_fields)
 
     def _redact_match(self, match: re.Match, full_text: str) -> str:
@@ -333,7 +395,17 @@ class BuiltInPiiSanitizer(PiiSanitizerSPI):
         *args: Any,
         **kwargs: Any,
     ) -> str:
-        """Sanitize sensitive entities in raw text strings."""
+        """Sanitize sensitive entities in raw text strings.
+
+        Args:
+            text: Raw input string to inspect and sanitize.
+            context: Optional PiiContext detailing lifecycle stage and caller identity.
+            *args: Optional positional arguments (e.g. max_chars limit).
+            **kwargs: Optional keyword arguments (e.g. max_chars limit).
+
+        Returns:
+            str: Redacted string with credentials, PII tokens, and secrets obscured.
+        """
         max_chars = int(kwargs.get("max_chars", args[0] if len(args) > 0 else DEFAULT_PAYLOAD_MAX_CHARS))
         cleaned = self.COMBINED_SECRET_REGEX.sub(lambda m: self._redact_match(m, text), text)
         if len(cleaned) > max_chars:
@@ -347,7 +419,17 @@ class BuiltInPiiSanitizer(PiiSanitizerSPI):
         *args: Any,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """Recursively sanitize a dictionary payload."""
+        """Recursively sanitize a dictionary payload.
+
+        Args:
+            payload: Input dictionary containing parameters or telemetry data.
+            context: Optional PiiContext detailing lifecycle stage and caller identity.
+            *args: Optional positional arguments (max_chars, masked_fields).
+            **kwargs: Optional keyword arguments (max_chars, masked_fields).
+
+        Returns:
+            Dict[str, Any]: New dictionary with sensitive fields and in-string PII redacted.
+        """
         max_chars = int(kwargs.get("max_chars", args[0] if len(args) > 0 else DEFAULT_PAYLOAD_MAX_CHARS))
         extra_masked = set(kwargs.get("masked_fields", args[1] if len(args) > 1 else ()))
         masked_lower = {str(f).lower() for f in extra_masked} | self._registered_masked_fields
@@ -378,7 +460,11 @@ _CURRENT_PII_SCOPE: str = DEFAULT_PII_REDACTION_SCOPE
 
 
 def get_pii_sanitizer() -> PiiSanitizerSPI:
-    """Retrieve the globally registered PiiSanitizerSPI instance, defaulting to BuiltInPiiSanitizer."""
+    """Retrieve the globally registered PiiSanitizerSPI instance, defaulting to BuiltInPiiSanitizer.
+
+    Returns:
+        PiiSanitizerSPI: Active PII sanitizer instance.
+    """
     global _CURRENT_PII_SANITIZER
     if _CURRENT_PII_SANITIZER is None:
         _CURRENT_PII_SANITIZER = BuiltInPiiSanitizer()
@@ -386,25 +472,37 @@ def get_pii_sanitizer() -> PiiSanitizerSPI:
 
 
 def set_pii_sanitizer(sanitizer: PiiSanitizerSPI) -> None:
-    """Register a custom PiiSanitizerSPI instance globally."""
+    """Register a custom PiiSanitizerSPI instance globally.
+
+    Args:
+        sanitizer: Custom PiiSanitizerSPI implementation to use across the framework.
+    """
     global _CURRENT_PII_SANITIZER
     _CURRENT_PII_SANITIZER = sanitizer
 
 
 def reset_pii_sanitizer() -> None:
-    """Reset global PII sanitizer back to default BuiltInPiiSanitizer."""
+    """Reset global PII sanitizer back to the default BuiltInPiiSanitizer instance."""
     global _CURRENT_PII_SANITIZER
     _CURRENT_PII_SANITIZER = None
 
 
 def get_pii_scope() -> str:
-    """Retrieve active PII redaction scope ('audit_only', 'full_in_flight', or 'disabled')."""
+    """Retrieve active PII redaction scope ('audit_only', 'full_in_flight', or 'disabled').
+
+    Returns:
+        str: Active PII scope identifier string.
+    """
     global _CURRENT_PII_SCOPE
     return _CURRENT_PII_SCOPE
 
 
 def set_pii_scope(scope: str) -> None:
-    """Set active PII redaction scope ('audit_only', 'full_in_flight', or 'disabled')."""
+    """Set active PII redaction scope ('audit_only', 'full_in_flight', or 'disabled').
+
+    Args:
+        scope: Target PII scope string from PII_SCOPE_* constants.
+    """
     global _CURRENT_PII_SCOPE
     _CURRENT_PII_SCOPE = scope
 

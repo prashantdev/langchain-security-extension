@@ -180,7 +180,15 @@ class SecurityIdentity:
         trace_id: Optional[str],
         span_id: Optional[str],
     ) -> "SecurityIdentity":
-        """Return a new SecurityIdentity with W3C OpenTelemetry trace and span identifiers attached."""
+        """Return a new SecurityIdentity with W3C OpenTelemetry trace and span identifiers attached.
+
+        Args:
+            trace_id: OpenTelemetry 32-character hexadecimal trace identifier.
+            span_id: OpenTelemetry 16-character hexadecimal span identifier.
+
+        Returns:
+            SecurityIdentity: New immutable identity instance containing the trace context.
+        """
         attrs = dict(self._attributes)
         if trace_id is not None:
             attrs["trace_id"] = trace_id

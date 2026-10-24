@@ -9,6 +9,7 @@ from security_core.identity import (
     SecurityIdentity,
     InvocationParameters,
     IdentityBridge,
+    SecurityContextHolder,
 )
 from security_core.pdp import (
     PolicyEvaluationRequest,
@@ -16,14 +17,22 @@ from security_core.pdp import (
     PolicyDecisionEngine,
     EmbeddedPolicyEngine,
     RoleGraph,
+    TwoTierDecisionCache,
+    PolicyRequest,
 )
-from security_core.cel_evaluator import CELEvaluator
+from security_core.cel_evaluator import (
+    CELEvaluator,
+    EntityAttributeResolverSPI,
+)
 from security_core.registry import SecurityRegistry
 from security_core.audit import (
     AuditEvent,
     AuditManager,
     AuditPublisherSPI,
+    AuditSanitizer,
     ConsoleAuditLogger,
+    JsonFileAuditLogger,
+    PythonLoggingAuditPublisher,
 )
 from security_core.prompt_injection import (
     PromptInjectionScanner,
@@ -37,6 +46,7 @@ from security_core.exceptions import (
     ToolExecutionDeniedError,
     ToolExecutionFeedbackException,
     PolicyViolationError,
+    SecurityValidationException,
 )
 from security_core.constants import (
     DECISION_PERMIT,
@@ -67,17 +77,24 @@ __all__ = [
     "SecurityIdentity",
     "InvocationParameters",
     "IdentityBridge",
+    "SecurityContextHolder",
+    "EntityAttributeResolverSPI",
     "PolicyEvaluationRequest",
     "PolicyDecision",
     "PolicyDecisionEngine",
     "EmbeddedPolicyEngine",
     "RoleGraph",
+    "TwoTierDecisionCache",
+    "PolicyRequest",
     "CELEvaluator",
     "SecurityRegistry",
     "AuditEvent",
     "AuditManager",
     "AuditPublisherSPI",
+    "AuditSanitizer",
     "ConsoleAuditLogger",
+    "JsonFileAuditLogger",
+    "PythonLoggingAuditPublisher",
     "PromptInjectionScanner",
     "PromptInjectionScanResult",
     "DiagnosticReasonEnum",
@@ -87,6 +104,7 @@ __all__ = [
     "ToolExecutionDeniedError",
     "ToolExecutionFeedbackException",
     "PolicyViolationError",
+    "SecurityValidationException",
     "DECISION_PERMIT",
     "DECISION_DENY",
     "ACTION_AGENT_INVOKE",

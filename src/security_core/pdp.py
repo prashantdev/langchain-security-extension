@@ -130,6 +130,7 @@ class PolicyEvaluationRequest:
 
 
 PolicyRequest = PolicyEvaluationRequest
+"""Alias for PolicyEvaluationRequest for specification naming compatibility."""
 
 
 
@@ -676,11 +677,15 @@ class EmbeddedPolicyEngine(PolicyDecisionEngine):
         return self._cache
 
     def register_invalidation_callback(self, callback: Any) -> None:
-        """Register a callback to be invoked upon cache eviction or subject invalidation."""
+        """Register a callback to be invoked upon cache eviction or subject invalidation.
+
+        Args:
+            callback: Callable invoked with subject_id on subject eviction, or with no arguments on full cache clear.
+        """
         self._invalidation_callbacks.append(callback)
 
     def clear_cache(self) -> None:
-        """Flush all Tier 2 static cache entries."""
+        """Flush all Tier 2 static cache entries and trigger registered invalidation callbacks."""
         self._cache.flush()
         for cb in list(getattr(self, "_invalidation_callbacks", [])):
             try:

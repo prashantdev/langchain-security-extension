@@ -108,7 +108,15 @@ class SecureRunnable:
         violation_handler: Any,
         fallback_builder: Any,
     ) -> "SecureRunnable":
-        """Bind a declarative ToolViolationHandler and fallback builder as an LCEL error boundary."""
+        """Bind a declarative ToolViolationHandler and fallback builder as an LCEL error boundary.
+
+        Args:
+            violation_handler: ToolViolationHandler instance managing retry budgets and abuse tracking.
+            fallback_builder: Callable taking (input_data, violation_resolution, config) and returning fallback response.
+
+        Returns:
+            SecureRunnable: Self instance with configured violation boundary.
+        """
         self._violation_handler = violation_handler
         self._violation_fallback = fallback_builder
         return self
@@ -119,7 +127,16 @@ class SecureRunnable:
         input_data: Any,
         config: Optional[Dict[str, Any]],
     ) -> Any:
-        """Execute a synchronous agent-to-agent handoff preserving in-band RunnableConfig and L1 cache."""
+        """Execute a synchronous agent-to-agent handoff preserving in-band RunnableConfig and L1 cache.
+
+        Args:
+            target_runnable: Downstream SecureRunnable receiving control.
+            input_data: Input data payload for the target runnable.
+            config: Active RunnableConfig carrying security identity and invocation state.
+
+        Returns:
+            Any: Execution result from the target runnable.
+        """
         if isinstance(config, dict):
             configurable = config.setdefault("configurable", {})
             configurable["sec:handoff_propagated"] = True
@@ -132,7 +149,16 @@ class SecureRunnable:
         input_data: Any,
         config: Optional[Dict[str, Any]],
     ) -> Any:
-        """Execute an asynchronous agent-to-agent handoff preserving in-band RunnableConfig and L1 cache."""
+        """Execute an asynchronous agent-to-agent handoff preserving in-band RunnableConfig and L1 cache.
+
+        Args:
+            target_runnable: Downstream SecureRunnable receiving control.
+            input_data: Input data payload for the target runnable.
+            config: Active RunnableConfig carrying security identity and invocation state.
+
+        Returns:
+            Any: Execution result from the target runnable.
+        """
         if isinstance(config, dict):
             configurable = config.setdefault("configurable", {})
             configurable["sec:handoff_propagated"] = True
@@ -403,7 +429,16 @@ class SecureRunnable:
             SecurityContextHolder.reset_identity(token)
 
     def stream(self, input_data: Any, *args: Any, **kwargs: Any) -> Iterator[Any]:
-        """Synchronously stream output chunks from protected Runnable."""
+        """Synchronously stream output chunks from protected Runnable.
+
+        Args:
+            input_data: Input data payload for stream processing.
+            *args: Optional positional arguments (config).
+            **kwargs: Optional keyword arguments (config).
+
+        Yields:
+            Any: Sanitized streamed output chunks from wrapped Runnable.
+        """
         config: Optional[Dict[str, Any]] = kwargs.get("config", args[0] if len(args) > 0 else None)
         identity = self._evaluate_entry_access(config)
         token = SecurityContextHolder.set_identity(identity)
@@ -422,7 +457,16 @@ class SecureRunnable:
             SecurityContextHolder.reset_identity(token)
 
     async def astream(self, input_data: Any, *args: Any, **kwargs: Any) -> AsyncIterator[Any]:
-        """Asynchronously stream output chunks from protected Runnable."""
+        """Asynchronously stream output chunks from protected Runnable.
+
+        Args:
+            input_data: Input data payload for async stream processing.
+            *args: Optional positional arguments (config).
+            **kwargs: Optional keyword arguments (config).
+
+        Yields:
+            Any: Sanitized streamed output chunks from wrapped Runnable.
+        """
         config: Optional[Dict[str, Any]] = kwargs.get("config", args[0] if len(args) > 0 else None)
         identity = self._evaluate_entry_access(config)
         token = SecurityContextHolder.set_identity(identity)
@@ -442,7 +486,16 @@ class SecureRunnable:
 
 
     def batch(self, inputs: List[Any], *args: Any, **kwargs: Any) -> List[Any]:
-        """Batch invoke protected Runnable across a list of input payloads."""
+        """Batch invoke protected Runnable across a list of input payloads.
+
+        Args:
+            inputs: List of input payloads to process.
+            *args: Optional positional arguments (config).
+            **kwargs: Optional keyword arguments (config).
+
+        Returns:
+            List[Any]: List of invocation results.
+        """
         config: Optional[Dict[str, Any]] = kwargs.get("config", args[0] if len(args) > 0 else None)
         return [self.invoke(inp, config) for inp in inputs]
 

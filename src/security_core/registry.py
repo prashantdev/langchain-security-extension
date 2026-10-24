@@ -22,7 +22,12 @@ class SecurityRegistry:
         pdp_engine: Optional[PolicyDecisionEngine] = None,
         entity_resolver: Optional[EntityAttributeResolverSPI] = None,
     ) -> None:
-        """Register default engine and resolver instances."""
+        """Register default engine and resolver instances.
+
+        Args:
+            pdp_engine: Default PolicyDecisionEngine implementation for security evaluations.
+            entity_resolver: Default EntityAttributeResolverSPI for hydrating dynamic entity attributes in CEL.
+        """
         if pdp_engine is not None:
             cls._default_pdp_engine = pdp_engine
         if entity_resolver is not None:
@@ -30,16 +35,24 @@ class SecurityRegistry:
 
     @classmethod
     def get_pdp_engine(cls) -> Optional[PolicyDecisionEngine]:
-        """Retrieve globally registered default PDP engine."""
+        """Retrieve globally registered default PDP engine.
+
+        Returns:
+            Optional[PolicyDecisionEngine]: Globally configured PDP engine, or None if not set.
+        """
         return cls._default_pdp_engine
 
     @classmethod
     def get_entity_resolver(cls) -> Optional[EntityAttributeResolverSPI]:
-        """Retrieve globally registered default EntityAttributeResolverSPI."""
+        """Retrieve globally registered default EntityAttributeResolverSPI.
+
+        Returns:
+            Optional[EntityAttributeResolverSPI]: Globally configured entity resolver, or None if not set.
+        """
         return cls._default_entity_resolver
 
     @classmethod
     def reset(cls) -> None:
-        """Reset registered defaults (used in test fixtures)."""
+        """Reset registered defaults to None (typically used in test teardowns)."""
         cls._default_pdp_engine = None
         cls._default_entity_resolver = None

@@ -80,6 +80,26 @@ class LangGraphNodeGuard:
             pdp_engine=pdp_engine,
         )
 
+    @property
+    def node_name(self) -> str:
+        """Get the guarded node identifier string."""
+        return self._node_name
+
+    @property
+    def required_roles(self) -> Sequence[str]:
+        """Get copy of required role identifiers."""
+        return list(self._required_roles)
+
+    @property
+    def min_clearance(self) -> int:
+        """Get minimum clearance level rank."""
+        return self._min_clearance
+
+    @property
+    def pdp_engine(self) -> PolicyDecisionEngine:
+        """Get the configured PolicyDecisionEngine instance."""
+        return self._pdp_engine
+
     def wrap_node(self, node_fn: Callable[[Dict[str, Any]], Dict[str, Any]]) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
         """Wraps a LangGraph node function with security evaluation.
 

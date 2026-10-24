@@ -580,7 +580,16 @@ class SecureRetriever(BaseRetriever):
         config: Optional[Any] = None,
         **kwargs: Any,
     ) -> List[SecureDocument]:
-        """Invoke the retriever synchronously capturing RunnableConfig for identity extraction and AST filtering."""
+        """Invoke the retriever synchronously capturing RunnableConfig for identity extraction and AST filtering.
+
+        Args:
+            input: Query string.
+            config: Optional RunnableConfig dictionary containing caller identity in configurable.
+            **kwargs: Additional retriever arguments.
+
+        Returns:
+            List[SecureDocument]: List of authorized SecureDocument objects.
+        """
         self._active_config = config
         try:
             return super().invoke(input, config=config, **kwargs)
@@ -600,6 +609,14 @@ class SecureRetriever(BaseRetriever):
         2. Generate AST filter dictionary according to store capability profile.
         3. Delegate fetch to self.base_retriever.get_relevant_documents(...) with search_kwargs={"filter": ast_filter}.
         4. Execute post-retrieval pruning and adaptive secondary paging.
+
+        Args:
+            query: Query string.
+            run_manager: Callback manager for retriever execution providing context and config.
+            **kwargs: Additional retriever arguments (e.g. top_k).
+
+        Returns:
+            List[SecureDocument]: Pruned and authorized documents.
         """
         run_config = getattr(run_manager, "config", None) or self._active_config
         identity = IdentityBridge.extract_from_config(run_config)
