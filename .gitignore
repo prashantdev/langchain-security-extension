@@ -18,6 +18,7 @@ coverage.xml
 
 # Documentation build
 site/
+*.drawio
 
 # IDE and environment
 .idea/
@@ -25,3 +26,4 @@ site/
 *.swp
 *.swo
 .venv/
+AGENTS.md
