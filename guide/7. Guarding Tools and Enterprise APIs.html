@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 7: Guarding Tools and Enterprise APIs: Parameter Rules, Safe Refusals, and Hard Halts</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html" class="active"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 7: Guarding Tools and Enterprise APIs: Parameter Rules, Safe Refusals, and Hard Halts</h1>
+
+<p>In enterprise architectures, language model agents interact with backend services, databases, and infrastructure through tool calling. Once an agent selects a tool and synthesizes its arguments, executing those parameters directly exposes corporate APIs to privilege escalation, parameter tampering, and injection attacks. Securing tools requires placing a Policy Enforcement Point (PEP: an inline boundary mechanism that intercepts requests to enforce access decisions) directly in the tool execution lifecycle. This interceptor queries a Policy Decision Point (PDP: the centralized engine that evaluates access rules and returns authorization verdicts), enforces parameter-level constraints, hides internal context from the model's function schemas, and applies deterministic failure contracts.</p>
+
+<p>In this chapter, we use the incident response assistant (<code>langchain-enterprise-incident-assistant</code>) as a concrete demonstrator to show how to guard enterprise tools in your applications using <code>langchain-security-extension</code>. We examine how to define fine-grained parameter rules using Common Expression Language (CEL), hydrate entity attributes dynamically, conceal security metadata from LLM parameter schemas, and enforce dual-mode violation contracts for read-only versus mutative operations.</p>
+
+<hr />
+
+<h2>The Tool Execution Interception Lifecycle</h2>
+
+<p>Tool execution guards place a Policy Enforcement Point (PEP) directly before tool execution logic. While LangChain's <code>BaseCallbackHandler.on_tool_start</code> can intercept invocations and raise exceptions to enforce hard halts, it cannot natively synthesize safe refusal outputs back to the model without crashing the chain. To support both hard halts and soft model feedback, the architecture wraps tool functions using the <code>@secured_tool</code> decorator:</p>
+
+<ol>
+    <li><strong>Context Extraction:</strong> Extracts the caller's <code>SecurityIdentity</code> from LangChain's <code>RunnableConfig</code> (<code>config["configurable"]["security_identity"]</code>) without relying on fragile thread-local storage.</li>
+    <li><strong>Schema Hiding &amp; Tamper-Proofing:</strong> During tool registration, <code>get_tool_schema</code> strips framework parameters defined in <code>HIDDEN_SECURITY_PARAMS</code> (e.g., <code>security_identity</code>, <code>config</code>, <code>runnable_config</code>) from the JSON schema presented to the LLM. Because these fields are never published in the tool's parameter schema, the model cannot view, hallucinate, or forge security contexts.</li>
+    <li><strong>Argument Normalization:</strong> Deserializes tool arguments supplied by the model into a normalized dictionary.</li>
+    <li><strong>Attribute Hydration &amp; CEL Evaluation:</strong> Compiles and evaluates Common Expression Language (CEL: a fast, non-Turing-complete, type-safe expression language used for evaluating policy rules) constraints against caller attributes and runtime arguments.</li>
+    <li><strong>Contract Enforcement:</strong> Executes the tool if permitted; otherwise, triggers either a <strong>Hard Abort</strong> (for mutative tools) or <strong>Model Feedback</strong> (for informational tools).</li>
+</ol>
+
+<hr />
+
+<h2>Parameter Constraints and Dynamic Entity Hydration</h2>
+
+<p>Static role checks (e.g. <em>"Is the user an Operator?"</em>) alone cannot determine whether a caller is authorized to operate on a specific target resource (e.g., whether an operator in Billing can restart an Inventory server). CEL expressions evaluate runtime arguments against the caller's identity claims under a defined scope: <code>subject</code>, <code>args</code>, <code>entities</code>, and <code>tool</code>.</p>
+
+<p><strong>What Can Be Achieved With CEL Rules at Tool PEP Boundaries:</strong> The <code>@secured_tool</code> decorator evaluates fine-grained Common Expression Language (CEL) expressions in a side-effect-free sandbox. Enterprise architects use CEL rules to enforce dynamic Attribute-Based Access Control (ABAC)—for example, asserting that target infrastructure matches the caller's department (<code>entities.server[args.server_name].ownerDepartment == subject.dept</code>), verifying numeric clearance thresholds (<code>subject.clearance &gt;= 2</code>), or binding tool parameter arguments to caller tenant attributes when tools consume explicit tenant identifiers (e.g., <code>args.tenant_id == subject.tenantId</code>).</p>
+
+<p>When tool arguments reference resource identifiers rather than raw ownership attributes, the engine delegates to an Entity Attribute Resolver SPI (Service Provider Interface: an extensibility pattern allowing custom classes to plug into framework pipelines) to look up entity ownership at runtime. If an entity cannot be resolved, the check fails closed immediately.</p>
+
+<p>In your enterprise application, you implement <code>EntityAttributeResolverSPI</code> to connect the security framework to your organization's asset databases, configuration management systems (CMDB), or directory services:</p>
+
+<p><strong>security_core/cel_evaluator.py</strong></p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_core/cel_evaluator.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional
+
+class EntityAttributeResolverSPI(ABC):
+    """SPI for dynamically hydrating resource metadata for CEL parameter evaluation."""
+
+    @abstractmethod
+    def resolve(self, entity_type: str, entity_id: str) -> Optional[Dict[str, Any]]:
+        """Resolves target entity attributes. Returns None if entity is not found to trigger fail-closed evaluation."""
+        pass
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> The library defines this abstract interface so policy evaluation remains completely decoupled from enterprise asset repositories. If <code>resolve()</code> returns <code>None</code>, the CEL engine raises a fail-closed exception.</p>
+
+<p>In our demonstrator assistant, this interface is implemented in a dedicated resolver class to look up server ownership records:</p>
+
+<p>New File: <strong>app/security/entity_resolver.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (NEW FILE)</span>
+      <span class="code-filename">app/security/entity_resolver.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">class IncidentAssistantEntityResolver(EntityAttributeResolverSPI):
+    """Resolves server department ownership from master inventory records."""
+
+    def resolve(self, entity_type: str, entity_id: str) -> Optional[Dict[str, Any]]:
+        if entity_type == "server":
+            department = SERVER_DEPARTMENT_MAP.get(str(entity_id).strip().lower())
+            if department:
+                return {"ownerDepartment": department}
+        return None
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> The resolver inspects the requested resource type and ID, returning ownership attributes such as <code>ownerDepartment</code>. If the target server is unlisted or missing, it returns <code>None</code>, causing CEL evaluation to immediately fail closed.</p>
+
+<h3>Resolver Discovery &amp; Dependency Injection</h3>
+
+<p>The <code>@secured_tool</code> interceptor dynamically discovers and binds the active <code>EntityAttributeResolverSPI</code> to the underlying CEL engine without requiring hardcoded dependencies in each tool function. The decorator resolves the SPI instance through the following precedence hierarchy:</p>
+
+<ol>
+    <li><strong>Tool Instance Attribute:</strong> Inspects the tool object itself (e.g., <code>self.entity_resolver</code> initialized on <code>InfrastructureTools</code>).</li>
+    <li><strong>Invocation Config:</strong> Reads the resolver injected into LangChain's <code>RunnableConfig</code> (<code>config["configurable"]["sec:entity_resolver"]</code>).</li>
+    <li><strong>PDP Evaluator Engine:</strong> Extracts the resolver already attached to the active PDP instance (<code>engine._cel_evaluator.entity_resolver</code>).</li>
+    <li><strong>Global Security Registry:</strong> Falls back to the system-wide singleton registered in <code>SecurityRegistry.get_entity_resolver()</code>.</li>
+</ol>
+
+<p>Once bound, expressions such as <code>entities.server[args.server_name].ownerDepartment</code> query the resolver on demand. If the entity is missing or the resolver returns <code>None</code>, the proxy raises a <code>KeyError</code>, immediately failing closed to a deterministic refusal or hard abort.</p>
+
+<hr />
+
+<h2>Dual-Mode Violation Contracts: Hard Abort vs. Model Feedback</h2>
+
+<p>When an evaluation fails authorization, the interceptor executes one of two deterministic response contracts depending on the operational nature of the tool:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Dimension</th>
+      <th>Hard Abort Contract (Fail-Stop)</th>
+      <th>Model Feedback Contract (Soft Refusal)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Target Tools</strong></td>
+      <td><strong>Mutative / Destructive:</strong> System state modifications, service restarts, database deletions, credential updates.</td>
+      <td><strong>Informational / Read-Only:</strong> Diagnostics, server status checks, telemetry queries, directory lookups.</td>
+    </tr>
+    <tr>
+      <td><strong>Interception Action</strong></td>
+      <td>Raises an unhandled <code>ToolExecutionDeniedError</code> immediately at the PEP boundary.</td>
+      <td>Suppresses function dispatch and returns a pre-formatted, synthetic denial message to model context.</td>
+    </tr>
+    <tr>
+      <td><strong>Agent Loop Impact</strong></td>
+      <td><strong>Terminates immediately:</strong> LLM never receives tool output, cannot re-prompt, and cannot retry alternative actions.</td>
+      <td><strong>Continues safely:</strong> LLM receives the refusal explanation and informs the user of permission limits conversationally.</td>
+    </tr>
+    <tr>
+      <td><strong>Audit Telemetry</strong></td>
+      <td>Emits high-severity <code>TOOL_HARD_ABORT_TRIGGERED</code> or threat escalation alert.</td>
+      <td>Emits <code>TOOL_FEEDBACK_VIOLATION</code> notice and tracks consecutive denial budgets.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><em>Security Design Note:</em> Informational tools provide synthetic feedback envelopes to enable conversational recovery (e.g., explaining to the user why a server status lookup was rejected). However, allowing conversational recovery introduces the risk of <strong>Agent Retry Loops</strong>, where the LLM repeatedly retries alternative parameters or tools. In Chapter 8, we explore how host workflows configure <code>ToolViolationHandler</code> and <code>SecureRunnable.with_violation_handler()</code> to enforce retry budgets and sliding-window abuse throttles against repetitive loop attacks.</p>
+
+<hr />
+
+<h2>Code Hardening: Securing Tool Declarations in Your Enterprise App</h2>
+
+<p>When hardening tools in your enterprise application, replace manual imperative permission checks with declarative <code>@secured_tool</code> decorators. In the reference assistant, this transformation is implemented in <code>app/agents/infrastructure_tools.py</code>. We examine this across five focused portions:</p>
+
+<h3>Portion 1: Defining CEL Parameter Expressions &amp; Masked Parameters</h3>
+
+<p>Define declarative CEL condition strings and parameter masking lists at the module level. These rules specify the exact conditions under which a caller may execute each tool:</p>
+
+<p><strong>app/agents/infrastructure_tools.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/infrastructure_tools.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff"> DIAGNOSTIC_INVALID_ENTITY = "INVALID_ENTITY_REMEDIATION"
+ INVALID_SERVER_KEYWORDS = ["fake", "nonexistent"]
+ 
++CEL_CHECK_SERVER_STATUS = "entities.server[args.server_name].ownerDepartment == subject.dept || subject.clearance >= 2"
++CEL_GET_USER_ENTITLEMENTS = "args.email == subject.id || subject.clearance >= 2"
++CEL_RESTART_SERVICE = "entities.server[args.server_name].ownerDepartment == subject.dept || subject.clearance >= 3"
++CEL_RESET_USER_PASSWORD = "args.email == subject.id || subject.clearance >= 2"
++
++MASKED_TOOL_PARAMS: List[str] = ["password", "token", "secret", "api_key", "credential"]
+ UNRESOLVED_SERVER_KEYWORDS = ["null-", "unresolved-"]
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> <code>CEL_CHECK_SERVER_STATUS</code> permits read-only status checks if the caller belongs to the server's owning department or possesses elevated clearance (&ge; 2). <code>CEL_RESTART_SERVICE</code> enforces a stricter policy for mutative restarts, requiring clearance &ge; 3. <code>MASKED_TOOL_PARAMS</code> instructs the security interceptor to redact sensitive arguments before recording security audit logs.</p>
+
+<h3>Portion 2: Binding the Entity Resolver in the Tool Class Constructor</h3>
+
+<p>Ensure the tool container class binds the active PDP engine and entity resolver so <code>@secured_tool</code> can discover them at invocation time:</p>
+
+<p><strong>app/agents/infrastructure_tools.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/infrastructure_tools.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -32,6 +39,10 @@ class InfrastructureTools:
+         if user_registry is None:
+             user_registry = user_registry_instance
+         self.user_registry = user_registry
++        from app.security.security_integration import get_pdp_engine
++        from app.security.entity_resolver import entity_resolver_instance
++        self.pdp_engine = kwargs.get("pdp_engine", get_pdp_engine())
++        self.entity_resolver = kwargs.get("entity_resolver", entity_resolver_instance)
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> Setting <code>self.entity_resolver</code> satisfies item 1 of the resolver discovery hierarchy. When CEL expressions evaluate <code>entities.server[...]</code>, the decorator resolves attributes directly through this instance without global mutable state.</p>
+
+<h3>Portion 3: Hardening Read-Only Informational Tools (Model Feedback Mode)</h3>
+
+<p>For informational queries like <code>check_server_status</code>, set <code>is_mutative=False</code> to return synthetic denial envelopes to the model:</p>
+
+<p><strong>app/agents/infrastructure_tools.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/infrastructure_tools.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -65,9 +76,17 @@ class InfrastructureTools:
+ 
+         return clean_server
+ 
++    @secured_tool(
++        required_roles=[],
++        min_clearance=CLEARANCE_STANDARD,
++        cel_expression=CEL_CHECK_SERVER_STATUS,
++        is_mutative=False,
++        masked_params=MASKED_TOOL_PARAMS,
++    )
+     def check_server_status(
+             self,
+             server_name: str,
++            security_identity: Optional[SecurityIdentity],
+             *args: Any,
+             **kwargs: Any,
+     ) -> str:
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> <code>is_mutative=False</code> instructs the PEP that if CEL authorization fails, the tool should not raise an exception. Instead, it synthesizes a structured denial payload (<code>{"status": "ACCESS_DENIED", ...}</code>) directly into model context, allowing the agent to explain the denial conversationally without crashing the request.</p>
+
+<h3>Portion 4: Hardening Mutative Tools (Hard Abort Mode)</h3>
+
+<p>For destructive actions like <code>restart_service</code>, set <code>is_mutative=True</code> to halt execution immediately upon policy failure:</p>
+
+<p><strong>app/agents/infrastructure_tools.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/infrastructure_tools.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -124,9 +143,17 @@ class InfrastructureTools:
+         return f"User: {email} | Department: UNKNOWN | Roles: NONE | Clearance: NONE | Status: NOT_FOUND / UNAUTHORIZED"
+ 
++    @secured_tool(
++        required_roles=[],
++        min_clearance=CLEARANCE_STANDARD,
++        cel_expression=CEL_RESTART_SERVICE,
++        is_mutative=True,
++        masked_params=MASKED_TOOL_PARAMS,
++    )
+     def restart_service(
+             self,
+             service_name: str,
+             server_name: str,
++            security_identity: Optional[SecurityIdentity],
+             *args: Any,
+             **kwargs: Any,
+     ) -> str:
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> Setting <code>is_mutative=True</code> guarantees fail-stop semantics. If an unauthorized caller triggers a restart, the PEP immediately raises <code>ToolExecutionDeniedError</code>. The underlying function never runs, no model feedback is returned, and execution is aborted instantly.</p>
+
+<h3>Portion 5: Schema Hiding and Parameter Tamper-Proofing</h3>
+
+<p>To prevent the LLM from hallucinating or forging security contexts, the security adapter strips framework context parameters from tool schemas before presenting them to the model:</p>
+
+<p><strong>security_adapter_langchain/tool_decorator.py</strong></p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_adapter_langchain/tool_decorator.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python"># Strips internal security and context parameters from LLM function definitions
+for hidden in HIDDEN_SECURITY_PARAMS:
+    props.pop(hidden, None)
+    if hidden in reqs:
+        reqs.remove(hidden)
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> During schema generation in <code>get_tool_schema()</code>, parameters in <code>HIDDEN_SECURITY_PARAMS</code> (such as <code>security_identity</code>, <code>config</code>, and <code>runnable_config</code>) are excised from the JSON schema. The model only receives domain parameters (e.g. <code>server_name</code>, <code>service_name</code>), guaranteeing caller identity cannot be spoofed in model prompts.</p>
+
+<hr />
+
+<h2>Verification Tests (Guardrail Tests)</h2>
+
+<p>Validate tool argument constraints, CEL resolution, schema hiding, and dual-mode violation behaviors using the standardized test suite:</p>
+
+<ul>
+    <li>
+        <strong>Test 08: CEL Parameter Department Mismatch Blocked (<code>08-cel-parameter-department-mismatch-blocked.sh</code>)</strong><br />
+        Verifies that cross-department service restart commands fail CEL validation and abort immediately.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/08-cel-parameter-department-mismatch-blocked.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 09: Dual-Mode Hard Abort Enforced (<code>09-dual-mode-hard-abort-enforced.sh</code>)</strong><br />
+        Verifies that unauthorized executions of mutative tools (e.g., cross-department service restart commands) trigger an immediate Hard Abort, halting the agent loop with <code>remediation_execution: ABORTED</code> and <code>remediation_security: BLOCKED_POLICY</code>.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/09-dual-mode-hard-abort-enforced.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 11: CEL Null Entity Resolution Fail-Closed (<code>11-cel-null-entity-resolution-fail-closed.sh</code>)</strong><br />
+        Verifies that non-existent or null target entities fail closed during CEL evaluation.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/11-cel-null-entity-resolution-fail-closed.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 12: Tool Interceptor Schema Hiding Verification (<code>12-tool-interceptor-schema-hiding-verification.sh</code>)</strong><br />
+        Verifies that framework context parameters (<code>security_identity</code>, <code>config</code>) are hidden from the JSON schema exposed to LLMs.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/12-tool-interceptor-schema-hiding-verification.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 13: Model Feedback Soft Refusal Returned (<code>13-model-feedback-soft-refusal-returned.sh</code>)</strong><br />
+        Verifies that read-only informational tool denials return synthetic model feedback rather than halting execution.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/13-model-feedback-soft-refusal-returned.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 14: CEL Entity Attribute Hydration Resolved (<code>14-cel-entity-attribute-hydration-resolved.sh</code>)</strong><br />
+        Verifies dynamic entity hydration via <code>EntityAttributeResolverSPI</code> for valid server records.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/14-cel-entity-attribute-hydration-resolved.sh</code></pre>
+</div>
+    </li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

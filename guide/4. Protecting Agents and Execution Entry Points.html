@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 4: Securing the Front Door: Protecting Agents and Execution Entry Points</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html" class="active"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 4: Securing the Front Door: Protecting Agents and Execution Entry Points</h1>
+
+<p>Every language model invocation incurs real costs in dollar spend, API rate limits, and processing latency. Allowing an unauthorized request past the perimeter consumes tokens formatting prompts, retrieving vector documents, and calling models, only to fail at a downstream tool check. Securing the front door means placing a Policy Enforcement Point (PEP: an inline boundary mechanism that intercepts requests to enforce access decisions) directly at the agent entry point, querying a Policy Decision Point (PDP: the centralized engine that evaluates access rules and returns authorization verdicts) before prompts are rendered or model endpoints are reached.</p>
+
+<hr />
+
+<h2>The Zero-Token Denial Principle</h2>
+
+<p>The <strong>Zero-Token Denial Principle</strong> states that if a caller lacks the entitlement to invoke an agent or execution graph, exactly zero model tokens must be consumed evaluating that refusal.</p>
+
+<p>Relying on system prompt instructions (e.g., <em>"Decline if the user is not an administrator"</em>) violates this principle:</p>
+<ul>
+  <li><strong>Economic and Latency Waste:</strong> Rejections still incur serialization overhead, HTTP latency, and input/output token billing.</li>
+  <li><strong>Privilege Escalation Exposure:</strong> Unhardened entry points allow unauthenticated or unauthorized callers into the model execution loop, relying purely on conversational steering.</li>
+</ul>
+
+<p><em>Security Boundary Distinction:</em> The Entry PEP enforces <strong>caller identity entitlement</strong> (verifying roles, clearance tier, and tenant isolation before invocation). Content-level prompt inspection (e.g. neutralizing jailbreak overrides like <em>"IGNORE ALL PREVIOUS INSTRUCTIONS"</em>) is handled upstream by the <strong>Ingestion Admission Control Scanner</strong> (covered in Chapter 5) and input payload sanitizers (Chapter 9). <code>SecureRunnable</code> intercepts the request completely outside the language model loop, terminating unauthorized callers in sub-millisecond time.</p>
+
+<hr />
+
+<h2><code>SecureRunnable</code> Interception Lifecycle</h2>
+
+<p>Because LangChain agents and chains adhere to LCEL (LangChain Expression Language: a declarative syntax used to compose LangChain primitives into executable chains), <code>SecureRunnable</code> acts as a non-invasive transparent proxy around any <code>Runnable</code> or callable. Upon invocation (<code>invoke</code>, <code>ainvoke</code>, <code>stream</code>), it executes a five-step sequence:</p>
+
+<ol>
+  <li><strong>Identity Extraction & Resolution:</strong> Resolves <code>SecurityIdentity</code> from <code>config["configurable"]["security_identity"]</code> via <code>IdentityBridge</code>. Missing identities default to anonymous and fail closed.</li>
+  <li><strong>In-Band Config & Callback Preparation:</strong> Automatically injects <code>CONFIG_KEY_SECURITY_IDENTITY</code>, <code>CONFIG_KEY_INVOCATION_PARAMS</code>, and the active <code>sec:pdp_engine</code> into <code>config["configurable"]</code>, while appending a <code>SecureCallbackHandler</code> to <code>config["callbacks"]</code> so downstream tool and RAG operations are transparently intercepted without manual callback wiring.</li>
+  <li><strong>PDP Authorization Evaluation:</strong> Submits a standardized <code>PolicyEvaluationRequest</code> tuple (subject, action, resource, context) to the PDP engine to enforce tenant isolation, required roles, and minimum clearance floors. Denials record structured audit events and raise an unchecked <code>AgentAccessDeniedException</code>.</li>
+  <li><strong>Ambient Context Binding:</strong> Sets the verified identity into <code>SecurityContextHolder</code> (with a try/finally block guaranteeing context reset), ensuring thread-local and async task propagation.</li>
+  <li><strong>Execution & Outbound Boundary:</strong> Invokes the underlying runnable, applying optional in-flight PII redaction and declarative violation fallback handling.</li>
+</ol>
+
+<p>The library implements this lifecycle by wrapping the target runnable in an inline evaluation gate that manages ambient context and policy enforcement:</p>
+
+<p><strong>security_adapter_langchain/runnable_guard.py</strong></p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_adapter_langchain/runnable_guard.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">class SecureRunnable:
+    """Transparent proxy enforcing PDP entry authorization prior to runnable execution."""
+
+    def invoke(self, input_data: Any, *args: Any, **kwargs: Any) -> Any:
+        config = kwargs.get("config", args[0] if len(args) > 0 else None)
+
+        # 1. Gate entry: evaluate roles, clearance, and tenant against PDP (raises if denied)
+        identity = self._evaluate_entry_access(config)
+
+        # 2. Bind ambient caller identity to execution context
+        token = SecurityContextHolder.set_identity(identity)
+        try:
+            # 3. Transparently pass execution to underlying Runnable or agent chain
+            return self._runnable.invoke(input_data, config=config)
+        finally:
+            # 4. Guarantee context cleanup to prevent cross-request leakage
+            SecurityContextHolder.reset_identity(token)
+</code></pre>
+</div>
+
+<hr />
+
+<h2>Code Hardening: The Decoupled PEP Pattern</h2>
+
+<p>To harden your enterprise application, decouple your public agent entry methods from underlying execution logic using the <strong>Decoupled PEP Pattern</strong>. The public entrypoint acts as the Policy Enforcement Point (PEP) gateway—validating caller <code>RunnableConfig</code> and delegating to <code>self.secured_workflow.invoke()</code>—guaranteeing that LLM prompts, token generation, and downstream tools are only ever reached if the PDP grants permission.</p>
+
+<p>In our reference assistant, this pattern is implemented in <code>app/agents/triage_agent.py</code> across two focused steps:</p>
+
+<h3>Step 1: Wrapping Business Logic with <code>SecureRunnable</code></h3>
+
+<p>During agent initialization, wrap your core execution method with <code>SecureRunnable.wrap()</code>, declaring the agent's target name, required roles, minimum clearance, and permitted tenant boundaries:</p>
+
+<p><strong>app/agents/triage_agent.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/triage_agent.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -47,6 +59,13 @@ class TriageAgent:
+             self.model_class,
+             self.api_key
+         )
++        self.secured_workflow = SecureRunnable.wrap(
++            runnable=self._execute_triage,
++            pdp_engine=get_pdp_engine(),
++            agent_name="triage_agent",
++            required_roles=TRIAGE_REQUIRED_ROLES,
++            min_clearance=TRIAGE_MIN_CLEARANCE,
++            target_tenant=ALLOWED_TENANTS,
++        )
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> Instead of calling the LLM directly, <code>self.secured_workflow</code> proxies calls to <code>_execute_triage</code>. Before <code>_execute_triage</code> is invoked, <code>SecureRunnable</code> queries the PDP to verify caller clearance, tenant matching, and roles.</p>
+
+<h3>Step 2: Guarding the Public Entry Point</h3>
+
+<p>Next, update the public entry method to extract or build <code>RunnableConfig</code>, delegating execution to the secured wrapper:</p>
+
+<p><strong>app/agents/triage_agent.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/triage_agent.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -126,8 +130,10 @@ class TriageAgent:
+     def triage(self, request: TicketRequest, *args: Any, **kwargs: Any) -> IncidentContext:
++        run_config: Optional[Dict[str, Any]] = args[0] if len(args) > 0 else kwargs.get("config")
++        if run_config is None:
++            sec_identity = security_identity_from_context(request.securityContext)
++            run_config = IdentityBridge.create_runnable_config(sec_identity)
++        return self.secured_workflow.invoke(request, config=run_config)
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> The public <code>triage()</code> method ensures caller identity is bundled into <code>RunnableConfig</code>. If the caller lacks authorization, <code>self.secured_workflow.invoke()</code> immediately raises <code>AgentAccessDeniedException</code> or <code>TenantIsolationError</code> before <code>_execute_triage</code> begins formatting prompts. For the full implementation, see <code>app/agents/triage_agent.py</code> in the reference assistant.</p>
+
+<h3>Step 3: Handling Entry Denials at the API Transport Boundary</h3>
+
+<p>At your outer HTTP router or controller, catch entry exceptions to construct standardized error responses, terminating unauthorized attempts with zero model token spend:</p>
+
+<p><strong>app/routers/tickets.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/routers/tickets.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -48,8 +54,18 @@ def submit_ticket(
+     sec_identity = security_identity_from_context(sec_context)
+     run_config = IdentityBridge.create_runnable_config(sec_identity)
+ 
+-    # Triage Phase
+-    incident_context = triage_agent_instance.triage(request)
++    # Triage Phase (Guarded by SecureRunnable Entry PEP)
++    try:
++        incident_context = triage_agent_instance.triage(request, config=run_config)
++    except TenantIsolationError as exc:
++        logger.warning(f"Triage entry tenant isolation violation: {exc}")
++        return build_entry_access_denied_report(request, exc, response, "BLOCKED_TENANT")
++    except AgentAccessDeniedException as exc:
++        logger.warning(f"Triage entry access denied: {exc}")
++        return build_entry_access_denied_report(request, exc, response, "BLOCKED")
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> Unauthorized callers are rejected at the route handler with HTTP 403 Forbidden without reaching the LLM.</p>
+
+<hr />
+
+<h2>Multi-Agent Delegation & Context-Preserving Handoff</h2>
+
+<p>In enterprise multi-agent workflows, an initial triage agent frequently delegates downstream tasks to specialized execution agents (such as a <code>RemediationAgent</code>). When transitioning between agents, naively invoking the second agent can drop caller identity, invalidate L1 decision cache entries, or lose OpenTelemetry trace IDs.</p>
+
+<p><code>SecureRunnable.handoff()</code> (and asynchronous <code>ahandoff()</code>) solves this by propagating in-band <code>RunnableConfig</code> across agent boundaries while marking <code>sec:handoff_propagated = True</code> and verifying the target agent's entry entitlements:</p>
+
+<p><strong>app/agents/remediation_agent.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/remediation_agent.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -133,13 +93,13 @@ class RemediationAgent:
+     def process_incident(self, context: IncidentContext, *args: Any, **kwargs: Any) -> RemediationReport:
+-        config: Optional[Dict[str, Any]] = args[0] if len(args) > 0 else kwargs.get("config")
+-        return self._execute_remediation(context, config=config)
++        run_config: Optional[Dict[str, Any]] = args[0] if len(args) > 0 else kwargs.get("config")
++        if run_config is None:
++            sec_identity = security_identity_from_context(context.securityContext)
++            run_config = IdentityBridge.create_runnable_config(sec_identity)
++
++        return SecureRunnable.handoff(self.secured_workflow, context, run_config)
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> <code>SecureRunnable.handoff()</code> carries the caller's verified <code>SecurityIdentity</code> and trace attributes directly to the secondary agent, ensuring consistent authorization enforcement without global state. See <code>app/agents/remediation_agent.py</code> in the reference assistant.</p>
+
+<hr />
+
+<h2>Declarative Violation Handler & Error Boundary</h2>
+
+<p>When an agent executes tools or secondary runnables within an LCEL graph, policy rejections from within the execution graph shouldn't trigger unhandled application crashes or expose internal stack traces. In your application, bind an error boundary to <code>SecureRunnable</code> using <code>.with_violation_handler(violation_handler, fallback_builder)</code>:</p>
+
+<p><strong>app/agents/remediation_agent.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/remediation_agent.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -96,8 +96,16 @@ class RemediationAgent:
++        self.violation_handler = ToolViolationHandler.default_handler(get_pdp_engine())
++        self.secured_workflow = SecureRunnable.wrap(
++            runnable=self._execute_remediation,
++            pdp_engine=get_pdp_engine(),
++            agent_name="remediation_agent",
++            required_roles=TRIAGE_REQUIRED_ROLES,
++            min_clearance=TRIAGE_MIN_CLEARANCE,
++            target_tenant=ALLOWED_TENANTS,
++        ).with_violation_handler(
++            violation_handler=self.violation_handler,
++            fallback_builder=build_violation_fallback_report,
++        )
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> When a downstream tool execution is blocked by policy, the error boundary catches the exception, resolves the violation details via the <code>ToolViolationHandler</code>, and invokes the <code>fallback_builder</code> to generate a graceful remediation report containing security diagnostic telemetry (e.g., <code>remediation_security: BLOCKED_POLICY</code>, <code>remediation_execution: ABORTED</code>) rather than aborting abruptly.</p>
+
+<hr />
+
+<h2>Verification Tests</h2>
+
+<p>Validate front-door execution guards, identity verification, and multi-agent context propagation using the project's security test suite:</p>
+
+<ul>
+    <li>
+        <strong>Test 03: Unauthorized User Request Blocked (<code>03-unauthorized-user-blocked.sh</code>)</strong><br />
+        Verifies that an unauthorized caller (e.g., external attacker with <code>ROLE_GUEST</code>) is rejected at the entry PEP with HTTP 403 Forbidden before any LLM prompt formatting or token consumption occurs.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./basic-security-tests/03-unauthorized-user-blocked.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 04: Cross-Tenant Isolation Blocked (<code>04-cross-tenant-isolation-blocked.sh</code>)</strong><br />
+        Confirms that requests originating from unauthorized or foreign tenants trigger a <code>TenantIsolationError</code> at the <code>SecureRunnable</code> gate and are blocked with HTTP 403.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./basic-security-tests/04-cross-tenant-isolation-blocked.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 05: Clearance Floor Violation Blocked (<code>05-clearance-floor-violation-blocked.sh</code>)</strong><br />
+        Confirms that callers with clearance ranks below the required <code>min_clearance</code> threshold are stopped at the front door by <code>SecureRunnable</code> with an <code>AgentAccessDeniedException</code>.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./basic-security-tests/05-clearance-floor-violation-blocked.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 09: Subagent Async Context Propagation (<code>09-subagent-async-context-propagated.sh</code>)</strong><br />
+        Verifies that <code>SecurityIdentity</code> and runnable configuration are seamlessly preserved across asynchronous thread and agent handoff boundaries.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./basic-security-tests/09-subagent-async-context-propagated.sh</code></pre>
+</div>
+    </li>
+</ul>
+
+<p>Library unit tests in <code>langchain-security-extension/tests/test_runnable_guard.py</code> further validate the underlying primitives:</p>
+<div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">pytest langchain-security-extension/tests/test_runnable_guard.py -k "test_secure_runnable"</code></pre>
+</div>
+  </main>
+</div>
+</body>
+</html>

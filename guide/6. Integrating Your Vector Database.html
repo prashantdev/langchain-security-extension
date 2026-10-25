@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 6: Integrating Your Vector Database: Permission-Aware Search and Data Pruning</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html" class="active"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 6: Integrating Your Vector Database: Permission-Aware Search and Data Pruning</h1>
+
+<p>Ingesting document chunks with <code>sec:*</code> security envelopes is only half the battle. When a user asks a question, the vector database retriever must ensure that restricted chunks and chunks from other tenants never leak into the model's prompt context. Vector search alone measures only semantic similarity, not authorization. Securing knowledge retrieval requires dynamic query pre-filtering to instruct the database engine to drop unauthorized records, coupled with in-memory post-retrieval verification to discard tampered entries and enforce clearance floors.</p>
+
+<hr />
+
+<h2>Two-Phase Retrieval Architecture</h2>
+
+<p>The contextual retrieval filter operates across two deterministic defense stages:</p>
+
+<ol>
+    <li><strong>Phase 1: Dynamic Filter Push-Down (Pre-Filtering):</strong> Extracts <code>SecurityIdentity</code> from LangChain's <code>RunnableConfig</code> and translates caller attributes into a native vector database filter dictionary (e.g., <code>{"$and": [...]}</code>).</li>
+    <li><strong>Phase 2: Post-Retrieval Pruning &amp; Verification:</strong> Validates retrieved candidate chunks in memory against the caller's clearance floor, role memberships, and cryptographic HMAC signatures before handing documents to the LLM prompt assembler.</li>
+</ol>
+
+<hr />
+
+<h2>Dynamic AST Pre-Filter Translation</h2>
+
+<p>An Abstract Syntax Tree (AST: a hierarchical tree representation of structural code or query expressions) dynamically compiles the caller's identity claims into the vector store's native dialect. This offloads coarse access control directly to the database engine:</p>
+
+<p><strong>security_adapter_langchain/retriever_wrapper.py</strong></p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_adapter_langchain/retriever_wrapper.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python"># security_adapter_langchain/retriever_wrapper.py
+def build_full_ast(self, identity: Optional[SecurityIdentity]) -> PrefilterAST:
+    """Constructs unconstrained full pre-filter AST from caller SecurityIdentity."""
+    if identity is None or identity.is_anonymous or identity.subject_id is None or str(identity.subject_id).upper() == ANONYMOUS_SUBJECT_ID:
+        # Strict Fail-Closed: Unauthenticated callers receive a synthetic deny-all sentinel filter
+        return PrefilterAST({SEC_TENANT_ID: "__DENY_ALL_UNAUTHENTICATED__"})
+
+    and_clauses: List[Dict[str, Any]] = [
+        {SEC_TENANT_ID: identity.tenant_id},
+        {SEC_CLEARANCE_FLOOR: {"$lte": identity.clearance_level}},
+    ]
+    if identity.roles:
+        and_clauses.append({SEC_ALLOWED_ROLES: {"$in": list(identity.roles)}})
+    return PrefilterAST({"$and": and_clauses})
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> If an unauthenticated caller issues a query, the method returns a synthetic deny-all filter (<code>__DENY_ALL_UNAUTHENTICATED__</code>), guaranteeing that no records match. For authenticated callers, it binds their tenant ID, clearance floor, and assigned roles into native database query filters.</p>
+
+<hr />
+
+<h2>Post-Retrieval Pruning, Top-K Oversampling, and In-Flight PII</h2>
+
+<p>When databases support only partial filtering or when metadata requires cryptographic verification, chunks must be pruned in memory. If a query requests 5 chunks (K=5) and 4 are discarded during clearance checks, the model suffers from <strong>Result Starvation</strong> (an information-loss condition where access pruning leaves too few documents for accurate reasoning).</p>
+
+<p>To prevent result starvation, <code>SecureRetriever</code> calculates an inflated candidate fetch size before querying the vector store:</p>
+
+<p><code>K_fetch = min(K_target &times; OversamplingFactor, K_max)</code></p>
+
+<p>If post-retrieval pruning still leaves fewer than K_target chunks, the retriever executes adaptive secondary paging up to a bounded threshold (default: 2 attempts). To prevent irrelevant documents from being injected simply to satisfy K_target, candidate oversampling and secondary paging enforce a configurable similarity score cutoff floor (<code>similarity_cutoff</code>, default: <code>0.0</code>), discarding any candidate whose similarity score falls below the relevance floor.</p>
+
+<p>Post-retrieval verification also serves as an active in-flight PII enforcement point: when full in-flight sanitization is enabled, retrieved document chunks are intercepted at stage <code>PII_STAGE_RETRIEVAL_DOCUMENT</code> and redacted before entering model prompt context (see <a href="9.%20Sanitizing%20Sensitive%20Payloads.html">Chapter 9: Sanitizing Sensitive Payloads</a> for detailed redaction policies).</p>
+
+<h3>Auditing and Telemetry Events</h3>
+
+<p>During query execution and candidate pruning, <code>SecureRetriever</code> emits standardized audit events to the Policy Decision Point (PDP) audit pipeline:</p>
+
+<ul>
+    <li><strong><code>EVENT_POLICY_TAMPER_DETECTED</code> (Severity: <code>CRITICAL_ALERT</code>):</strong> Emitted when a document chunk's <code>sec:envelope_hash</code> fails cryptographic HMAC verification, dropping the tampered record immediately.</li>
+    <li><strong><code>EVENT_RAG_UNAUTHORIZED_PRUNING</code> (Severity: <code>NOTICE</code>):</strong> Emitted when candidate chunks are pruned in memory due to missing mandatory security envelope tags, insufficient clearance level, or role mismatch.</li>
+    <li><strong><code>EVENT_RAG_RESULT_STARVATION</code> (Severity: <code>WARNING</code>):</strong> Emitted when final authorized candidates returned to the caller are fewer than the requested target top-K despite oversampling and secondary paging attempts.</li>
+</ul>
+
+<hr />
+
+<h2>Vector Store Metadata Type Constraints</h2>
+
+<p>Embedded stores like ChromaDB require primitive scalar metadata types (strings, integers, floats, booleans). Complex attributes such as <code>sec:allowed_roles</code> must be flattened into delimited strings during ingestion, and reconstructed during retrieval:</p>
+
+<p><strong>app/agents/knowledge_base_store.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/knowledge_base_store.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">def to_chroma_metadata(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalizes metadata values into ChromaDB-compatible primitive scalar types."""
+    chroma_meta: Dict[str, Any] = {}
+    for k, v in meta.items():
+        if isinstance(v, (str, int, float, bool)):
+            chroma_meta[k] = v
+        elif isinstance(v, (list, tuple, set)):
+            chroma_meta[k] = ",".join(str(item) for item in v)
+        elif v is None:
+            chroma_meta[k] = ""
+        else:
+            chroma_meta[k] = str(v)
+    return chroma_meta
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> Complex Python types like lists or sets are flattened into comma-delimited strings to comply with ChromaDB's scalar storage requirements, preserving all security envelope attributes without serialization errors.</p>
+
+<hr />
+
+<h2>Code Hardening: Securing Runbook Retrieval</h2>
+
+<p>When hardening knowledge retrieval in your enterprise app, wrap your vector retriever with <code>SecureRetriever.wrap()</code> and forward caller identity via <code>RunnableConfig</code> into <code>_retriever.invoke()</code>. In the reference assistant, this transformation is implemented in <code>app/agents/knowledge_base_store.py</code> across two steps:</p>
+
+<h3>Step 1: Wrapping the Base Retriever</h3>
+
+<p>Wrap the underlying vector store retriever with <code>SecureRetriever.wrap()</code>, configuring candidate oversampling, storage capability profile, and the secondary fetch callback:</p>
+
+<p><strong>app/agents/knowledge_base_store.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/knowledge_base_store.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -25,12 +25,18 @@ class KnowledgeBaseStore:
+-        # INSECURE: Returns raw retriever without tenant boundaries or clearance checks
+-        self._retriever = self._vector_store.as_retriever(search_kwargs={"k": TOP_K_DEFAULT})
++        pdp_engine = get_pdp_engine()
++        base_retriever = self._vector_store.as_retriever(search_kwargs={"k": TOP_K_DEFAULT})
++        self._retriever = SecureRetriever.wrap(
++            base_retriever,
++            pdp_engine=pdp_engine,
++            oversampling_factor=DEFAULT_OVERSAMPLING_FACTOR,
++            secret_key=config.security_hmac_secret,
++            store_profile=STORE_PROFILE_FULL_AST,
++            secondary_fetch_fn=self._secondary_fetch_chroma_page,
++        )
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> Wrapping the base retriever attaches AST filter compilation, cryptographic HMAC validation, and secondary paging. If unauthorized chunks are pruned post-retrieval, <code>_secondary_fetch_chroma_page</code> fetches subsequent batches to satisfy target K.</p>
+
+<h3>Step 2: Propagating Caller Identity into Search</h3>
+
+<p>Ensure that search methods pass caller identity to <code>_retriever.invoke()</code> inside <code>RunnableConfig</code>:</p>
+
+<p><strong>app/agents/knowledge_base_store.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/knowledge_base_store.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -410,12 +425,15 @@ class KnowledgeBaseStore:
+     def search(self, query: str, *args: Any, **kwargs: Any) -> List[TextSegment]:
++        run_config: Optional[Dict[str, Any]] = args[1] if len(args) > 1 else kwargs.get("config")
++        if run_config is None:
++            from security_core.identity import IdentityBridge
++            resolved_identity = IdentityBridge.resolve_identity(kwargs.get("identity"))
++            run_config = IdentityBridge.create_runnable_config(resolved_identity)
++
++        # CRITICAL: Caller identity must be passed via RunnableConfig into retriever invoke
++        pruned_docs = self._retriever.invoke(query, config=run_config, top_k=top_k)
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> <code>SecureRetriever.invoke()</code> extracts caller identity from <code>run_config["configurable"]["security_identity"]</code>, compiles the dynamic AST pre-filter, queries the database, and verifies candidate envelopes. See <code>app/agents/knowledge_base_store.py</code> in <code>secured</code> branch for the complete search implementation.</p>
+
+<hr />
+
+<h2>Storage Engine Capability Profiles</h2>
+
+<p>Vector databases differ in their native filtering capabilities. <code>SecureRetriever</code> negotiates filter predicates based on the underlying storage profile:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Store Capability Profile</th>
+      <th>Database Push-Down (Phase 1)</th>
+      <th>In-Memory Fallback Pruning (Phase 2)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Full AST Profile</strong><br /><em>(PgVector, OpenSearch)</em></td>
+      <td>Full push-down: <code>tenant_id</code>, numeric <code>clearance_floor</code> (0 &le; PUBLIC &lt; 1 &le; INTERNAL &lt; 2 &le; CONFIDENTIAL &lt; 3 &le; RESTRICTED), and role set containment ($in).</td>
+      <td>HMAC integrity verification and final top-K window truncation.</td>
+    </tr>
+    <tr>
+      <td><strong>Constrained Profile</strong><br /><em>(Basic / Key-Value Stores)</em></td>
+      <td>Partial push-down: strict equality on <code>sec:tenant_id</code> and optional <code>sec:department_id</code>.</td>
+      <td>Clearance ranking, role intersection, HMAC verification, and secondary page hydration.</td>
+    </tr>
+    <tr>
+      <td><strong>No-Filter Profile</strong><br /><em>(Simple In-Memory Stores)</em></td>
+      <td>None (bypassed).</td>
+      <td>100% evaluated in memory across all security envelope tags with 3.0&times; oversampling.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><em>Note on ChromaDB and Embedded Stores:</em> While the demo application specifies <code>STORE_PROFILE_FULL_AST</code> for ChromaDB to evaluate basic equality and numeric ranges, ChromaDB does not natively support array containment on unflattened lists or complex boolean operators like <code>$exists</code>. The security adapter applies <code>_sanitize_chroma_filter()</code> to strip incompatible clauses before query execution, relying on Phase 2 post-retrieval verification to evaluate any unsanitized predicates.</p>
+
+<hr />
+
+<h2>Verification Tests (Guardrail Tests)</h2>
+
+<p>Validate permission-aware retrieval, AST compilation, oversampling, and cryptographic tamper detection using the project's standardized guardrail suite:</p>
+
+<ul>
+    <li>
+        <strong>Test 06: HMAC Envelope Tamper Detection (<code>06-hmac-envelope-tamper-detection.sh</code>)</strong><br />
+        Verifies that <code>SecureRetriever</code> re-computes the SHA-256 HMAC (Hash-based Message Authentication Code: a cryptographic signature verifying data integrity and authenticity) signature on chunks post-retrieval, dropping any record whose metadata envelope was tampered with in storage.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/06-hmac-envelope-tamper-detection.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 15: RAG Clearance Data Leakage Prevented (<code>15-rag-clearance-data-leakage-prevented.sh</code>)</strong><br />
+        Confirms post-retrieval clearance gating by asserting that low-clearance callers are blocked from receiving classified runbook chunks into prompt context.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/15-rag-clearance-data-leakage-prevented.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 16: RAG Top-K Predictive Oversampling and Paging (<code>16-rag-topk-predictive-oversampling-and-paging.sh</code>)</strong><br />
+        Validates candidate oversampling multipliers and adaptive secondary paging fallbacks to guarantee result sets meet target K when unauthorized chunks are pruned.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/16-rag-topk-predictive-oversampling-and-paging.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 17: RAG VectorStore AST Prefilter Translation (<code>17-rag-vectorstore-ast-prefilter-translation.sh</code>)</strong><br />
+        Tests the dynamic translation of <code>SecurityIdentity</code> attributes into native vector store metadata filter dictionaries to enforce push-down pre-filtering.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/17-rag-vectorstore-ast-prefilter-translation.sh</code></pre>
+</div>
+    </li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

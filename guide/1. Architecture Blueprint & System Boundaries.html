@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 1: Architecture Blueprint &amp; System Boundaries</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+    </script>
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html" class="active"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 1: Architecture Blueprint &amp; System Boundaries</h1>
+
+<p>Integrating GenAI agents into an enterprise stack should not require rebuilding your security architecture from scratch. If your organization already has an established Identity Provider, a role-based access control (RBAC) database, and an enterprise logging system, this library is built to slip directly between those existing pieces and your LangChain workflows without getting in the way.</p>
+
+<hr />
+
+<h2>The Library as an Inline Security Checkpoint (PEP)</h2>
+
+<p>In security architecture terminology, a <strong>Policy Enforcement Point (PEP)</strong> is simply the gatekeeper or security guard standing at the door. It intercepts incoming requests, asks an authorization engine whether the request is allowed, and either permits the operation to proceed or blocks it immediately.</p>
+
+<p>This library functions as an inline PEP inside your Python application. Instead of relying on LangChain or external LLM models to police themselves through system prompts, the library intercepts execution across three key boundaries:</p>
+
+<ul>
+<li><p><strong>The Front Door:</strong> Before a user prompt ever reaches a language model or constructs a prompt chain.</p></li>
+<li><p><strong>The Data Boundary:</strong> Before internal documents from your vector databases enter the model context window.</p></li>
+<li><strong>The Tool Boundary:</strong> Before an agent executes a Python function, writes to a database, or calls an external enterprise API.</li>
+</ul>
+
+<p><img src="introductory-arch2.png"></p>
+
+<hr />
+
+<h2>Clarifying the Jargon: PEP vs. PDP</h2>
+
+<p>To make implementation straightforward across teams, keep the distinction between enforcement and decision-making clear:</p>
+
+<ul>
+<li><p><strong>PEP (Policy Enforcement Point — The Enforcer):</strong> This library. It sits inline within the code, halts unauthorized tool calls, redacts unauthorized retrieved documents, and prevents unauthorized prompt runs.</p></li>
+<li><p><strong>PDP (Policy Decision Point — The Brain):</strong> The engine that actually evaluates the rules. You can run the library's embedded in-memory PDP for local role hierarchies, or connect an external PDP like Open Policy Agent (OPA) to evaluate enterprise-wide policies.</p></li>
+</ul>
+
+<p>The PEP catches the action, asks the PDP for a verdict ("allow" or "deny"), and enforces that verdict with zero ambiguity.</p>
+
+<hr />
+
+<h2>The Four System Boundaries</h2>
+
+<p>The architecture organizes protection across four distinct system boundaries:</p>
+
+<ul>
+<li><p><strong>1. Entry Boundary (Agent Entry Points):</strong> The <code>SecureRunnable</code> wrapper validates caller entitlements immediately upon invocation, ensuring unauthorized requests are rejected before prompt templates are populated or model tokens are consumed.</p></li>
+<li><p><strong>2. Retrieval Boundary (Document Search &amp; Ingestion):</strong> Ingestion pipelines stamp chunks with tamper-evident <code>sec:*</code> metadata tags, and the <code>SecureRetriever</code> converts caller roles into native vector store filters combined with post-retrieval verification to prevent candidate starvation and data leaks.</p></li>
+<li><strong>3. Tool Boundary (Action Guardrails):</strong> Decorated tools evaluate Common Expression Language (CEL) constraints against incoming arguments, halting mutating actions instantly while returning safe feedback for informational tools.</li>
+<li><strong>4. Observability Boundary (Enterprise SIEM):</strong> A non-blocking asynchronous ring buffer strips sensitive parameters and streams structured security audit events to your enterprise logging systems without adding latency to model response times.</li>
+</ul>
+
+<hr />
+
+<h2>End-to-End Enforcement Lifecycle</h2>
+
+<p>While the four boundaries define <em>where</em> security controls exist, understanding how a request flows through them chronologically is essential. The core principle of the library is <strong>pre-execution determinism</strong>: security evaluation occurs in the Python runtime <em>before</em> any tool executes or vector chunk is returned, consuming zero LLM prompt tokens and eliminating prompt-injection and privilege escalation risks.</p>
+
+<div class="diagram-wrapper" style="background: #ffffff; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color); margin: 24px 0; overflow-x: auto;">
+  <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    actor Caller as Client / Web Layer
+    participant Bridge as IdentityBridge (PIP)
+    participant Runnable as SecureRunnable (Boundary 1: Entry PEP)
+    participant Agent as LangChain Agent / LCEL
+    participant ToolPEP as @secured_tool (Boundary 3: Tool PEP)
+    participant PDP as Policy Decision Engine (PDP)
+    participant CEL as CEL Evaluator
+    participant SIEM as AuditPublisherSPI (Boundary 4: Observability)
+    participant Tool as Target Tool Callable
+
+    Caller->>Bridge: create_runnable_config(security_identity)
+    Bridge-->>Caller: config (with in-band identity)
+    Caller->>Runnable: invoke(input, config=config)
+    
+    rect rgb(245, 248, 255)
+        Note over Runnable,PDP: Boundary 1: Entry Enforcement
+        Runnable->>PDP: evaluate(subject, action="AGENT_INVOKE")
+        PDP-->>Runnable: PERMIT
+    end
+    
+    Runnable->>Agent: execute_chain(prompt, config)
+    Agent->>ToolPEP: invoke_tool(args, config)
+    
+    rect rgb(240, 253, 244)
+        Note over ToolPEP,CEL: Boundary 3: Tool Parameter Guardrails (0 LLM Tokens)
+        ToolPEP->>CEL: evaluate_expression(cel_rule, args, subject)
+        CEL-->>ToolPEP: Condition Satisfied
+        ToolPEP->>PDP: evaluate(subject, action="TOOL_EXECUTE", resource)
+        PDP-->>ToolPEP: PERMIT (Evaluated via L1/L2 Cache)
+        ToolPEP->>SIEM: publish(AuditEvent: PERMIT)
+    end
+    
+    ToolPEP->>Tool: execute(*args, **kwargs)
+    Tool-->>ToolPEP: raw_output
+    ToolPEP-->>Agent: sanitized_output (PII redacted)
+    Agent-->>Runnable: final_response
+    Runnable-->>Caller: secure_result
+  </pre>
+</div>
+
+<h3>Chronological Execution Phases</h3>
+
+<ol>
+  <li><strong>Context Ingestion &amp; Binding (Boundary 1 — Entry):</strong> Your web layer extracts authenticated user credentials (JWT/OAuth) and uses <code>IdentityBridge</code> to construct an immutable <code>SecurityIdentity</code>. This identity is bound directly into LangChain's native <code>RunnableConfig</code>. The identity travels in-band across all downstream Runnables, agents, and tool invocations without polluting the model prompt context.</li>
+  <li><strong>Agent Admission Evaluation (Boundary 1 — Entry):</strong> The <code>SecureRunnable</code> PEP queries the PDP to verify caller role entitlement and clearance floor. If the user lacks access, execution is immediately halted with a <code>SecurityAuthorizationError</code> before prompt serialization or LLM token expenditure occurs.</li>
+  <li><strong>Pre-Execution Tool Guardrails (Boundary 3 — Tool):</strong> When an agent emits a tool call, the <code>@secured_tool</code> decorator intercepts execution before the target Python function runs. It evaluates Common Expression Language (CEL) predicates against runtime parameters (e.g., verifying that a server hostname matches the user's assigned department).</li>
+  <li><strong>Zero-Latency Policy Evaluation (PDP):</strong> The PEP queries the PDP engine. By leveraging two-tier caching (L1 thread-local memoization and L2 TTL-based LRU cache), repeated evaluations complete in sub-millisecond local Python execution.</li>
+  <li><strong>Asynchronous Audit Streaming (Boundary 4 — Observability):</strong> Regardless of whether an operation is permitted or denied, an immutable RFC 5424 structured event is dispatched to the background ring buffer. Telemetry is shipped asynchronously to enterprise log aggregators (Splunk, Elastic) without blocking the user response.</li>
+</ol>
+
+<div class="callout-card">
+  <h4>Key Architectural Guarantee:</h4>
+  <p>If the model hallucinates an invalid parameter, attempts an unauthorized action, or is hijacked via prompt injection, the code-level PEP denies execution deterministically. The target Python callable never runs, and the incident is recorded in SIEM.</p>
+</div>
+
+<hr />
+
+<h2>Mapping the Four Boundaries to Your Application</h2>
+
+<p>When planning the hardening of your enterprise AI application, identify where these four boundaries lie within your codebase. Throughout this guide, we ground each boundary using our reference assistant (<code>langchain-enterprise-incident-assistant</code>) as a realistic case study, comparing its unhardened <code>master</code> baseline with its hardened <code>secured</code> target:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>System Boundary</th>
+      <th>Where It Sits in Your Enterprise Stack</th>
+      <th>Reference Assistant Implementation</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>1. Entry Boundary</strong></td>
+      <td>API controllers, FastAPI/Flask route handlers, background queue workers</td>
+      <td><code>app/routers/tickets.py</code> and <code>app/agents/triage_agent.py</code> (see <a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html">Chapter 4</a>)</td>
+    </tr>
+    <tr>
+      <td><strong>2. Retrieval Boundary</strong></td>
+      <td>ETL document loaders, chunk splitters, vector store retrievers (Chroma, Pinecone, OpenSearch)</td>
+      <td><code>app/agents/knowledge_base_store.py</code> (see <a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html">Chapter 5</a> &amp; <a href="6.%20Integrating%20Your%20Vector%20Database.html">Chapter 6</a>)</td>
+    </tr>
+    <tr>
+      <td><strong>3. Tool Boundary</strong></td>
+      <td>Agent tools calling internal microservices, DB queries, cloud infrastructure APIs</td>
+      <td><code>app/agents/infrastructure_tools.py</code> and <code>app/security/entity_resolver.py</code> (see <a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html">Chapter 7</a> &amp; <a href="8.%20Defending%20Against%20Agent%20Looping.html">Chapter 8</a>)</td>
+    </tr>
+    <tr>
+      <td><strong>4. Observability Boundary</strong></td>
+      <td>Log aggregation forwarders, SIEM pipelines (Splunk, Elastic, OpenTelemetry)</td>
+      <td><code>app/security/security_integration.py</code> and <code>app/agents/guardrail_tests_telemetry_helper.py</code> (see <a href="9.%20Sanitizing%20Sensitive%20Payloads.html">Chapter 9</a> &amp; <a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html">Chapter 10</a>)</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>By mapping each boundary in your existing architecture to its corresponding checkpoint, you can incrementally harden your service without having to refactor core business logic or rewrite LangChain chains.</p>
+  </main>
+</div>
+</body>
+</html>

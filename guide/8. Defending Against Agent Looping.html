@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 8: Defending Against Agent Looping: Setting Retry Budgets and Abuse Throttles</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html" class="active"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 8: Defending Against Agent Looping: Setting Retry Budgets and Abuse Throttles</h1>
+
+<p>When an autonomous agent in your enterprise application encounters a policy denial on an informational or read-only tool (such as parameter rejections triggered by CEL rules at tool PEP boundaries, as detailed in <a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html">Chapter 7: Guarding Tools and Enterprise APIs</a>), modern LLMs frequently attempt to recover by modifying arguments, retrying alternative tools, or probing boundary values. Without active defenses, this behavior can degenerate into a <strong>Recursive Retry Loop</strong> (an execution cycle where an agent repeatedly retries failed actions), resulting in rapid token exhaustion, elevated API costs, or adversarial parameter fuzzing. Defending against agent looping requires bounding retries at two distinct operational scopes: an invocation-scoped retry tracker to cap consecutive denials within a single turn, and a sliding-window abuse throttle to detect distributed parameter scanning across multiple conversation turns.</p>
+
+<p>In this chapter, we use the incident response assistant (<code>langchain-enterprise-incident-assistant</code>) as a concrete demonstrator to show how to configure intelligent retry budgets and sliding-window abuse throttles in your enterprise LLM applications using <code>langchain-security-extension</code>. We examine how to configure tracking components, wrap agent workflows with <code>SecureRunnable</code> error boundaries, enforce zero-token cross-turn throttles, and wire declarative fallback builders that safely catch policy aborts.</p>
+
+<hr />
+
+<h2>The Anatomy of an Agent Denial Loop</h2>
+
+<p>Unbounded tool retry cycles present two severe risks to enterprise infrastructure:</p>
+
+<ul>
+    <li><strong>Token and Cost Exhaustion:</strong> When an agent receives synthetic denial feedback, it often regenerates tool calls with minor prompt permutations until hitting framework-level iteration limits, burning model context windows and incurring unnecessary inference latency.</li>
+    <li><strong>Policy Brute-Force Scanning:</strong> Malicious or jailbroken prompts direct an agent to systematically scan parameter spaces (e.g., iterating server names from <code>srv-billing-01</code> to <code>srv-billing-20</code>) across turns to discover which enterprise assets lack strict authorization rules.</li>
+</ul>
+
+<p><strong>Framework Iteration Limits vs. Semantic PEP Retry Budgets:</strong> Unlike standard framework iteration limits (such as LangChain's <code>max_iterations=15</code> or LangGraph's <code>recursion_limit</code>), which blindly cycle and burn tokens until an arbitrary execution ceiling, the <strong>Semantic PEP Retry Budget</strong> acts as an intelligent security circuit-breaker that halts execution immediately after consecutive policy denials or unauthorized mutative attempts.</p>
+
+<p>To mitigate both threats, the <code>langchain-security-extension</code> library introduces a dual-layer tracking architecture managed by <code>ToolViolationHandler</code> within the <code>RunnableConfig</code> lifecycle.</p>
+
+<hr />
+
+<h2>Dual-Layer Anti-Loop Architecture</h2>
+
+<p>The defense model decouples turn-level retry accounting from caller-level abuse detection:</p>
+
+<ol>
+    <li><strong>Invocation-Scoped Retry Budget (<code>RetryBudgetTracker</code>):</strong> Tracks consecutive tool feedback refusals within the active invocation turn using <code>RunnableConfig["configurable"]["sec:retry_count"]</code>. When denials exceed <code>max_feedback_violations</code> (default: <code>2</code>), the budget is exhausted. The next denial triggers an immediate hard abort and logs <code>EVENT_POLICY_BRUTE_FORCE_DETECTED</code>.</li>
+    <li><strong>Cross-Turn Sliding-Window Abuse Throttling (<code>AbuseThrottleTracker</code>):</strong> Tracks timestamped policy denial history per subject ID across a configurable rolling window (e.g., <code>window_seconds = 60.0</code>, <code>max_denials = 3</code>). If a caller repeatedly triggers policy denials across distinct conversation turns, the tracker marks the subject as throttled, aborts subsequent requests, and emits a high-severity <code>EVENT_POLICY_BRUTE_FORCE_SCANNING</code> SIEM alert.</li>
+    <li><strong>Structured Resolution Dispatch (<code>ToolViolationHandler</code>):</strong> Evaluates policy decisions against both trackers, returning a structured <code>ViolationResolution</code> object that dictates whether execution should continue with synthetic feedback or terminate immediately.</li>
+</ol>
+
+<p><strong>Configuring Retry Budgets and Abuse Throttles in the Security Library</strong></p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_adapter_langchain/violation_handler.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">from security_adapter_langchain.violation_handler import (
+    ToolViolationHandler,
+    RetryBudgetTracker,
+    AbuseThrottleTracker,
+)
+
+# Option 1: Standard defaults (2 feedback retries per turn, 3 denials / 60s sliding abuse window)
+violation_handler = ToolViolationHandler.default_handler(pdp_engine)
+
+# Option 2: Config-driven initialization with application properties
+retry_tracker = RetryBudgetTracker.create(max_feedback_violations=config.retry_max_violations)
+abuse_tracker = AbuseThrottleTracker.create(
+    window_seconds=config.abuse_window_seconds,
+    max_denials=config.abuse_max_denials,
+)
+violation_handler = ToolViolationHandler.create(
+    pdp_engine=pdp_engine,
+    retry_tracker=retry_tracker,
+    abuse_tracker=abuse_tracker,
+)
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> The library allows applications to construct <code>ToolViolationHandler</code> either using out-of-the-box defaults or customized with application configuration. The handler coordinates both trackers during each tool violation evaluation.</p>
+
+<h3>Parameter Privilege Escalation Detection</h3>
+
+<p>In addition to tallying raw attempts, the interceptor inspects tool arguments across consecutive denials. By snapshotting invocation arguments in <code>RunnableConfig["configurable"]["sec:prev_args"]</code>, the guard detects parameter mutations (such as an agent scanning alternate server identifiers, user IDs, or departments). When arguments change between rejected attempts, the interceptor immediately publishes a high-severity <code>EVENT_PARAMETER_PRIVILEGE_ESCALATION</code> security alert to enterprise SIEM telemetry.</p>
+
+<h3>Per-User Request Isolation in <code>RunnableConfig</code></h3>
+
+<p>Crucially, retry budgets are isolated strictly <strong>per user request invocation</strong>. Because retry state is stored in-band within the active request's <code>RunnableConfig["configurable"]["sec:retry_count"]</code> rather than in a shared or static global variable, concurrent requests from different users maintain independent retry budgets. User Alice receiving two synthetic denials on her ticket run will not deplete or impact the retry quota of User Bob submitting requests concurrently, ensuring each user receives their fair, unpolluted recovery attempts.</p>
+
+<p>Furthermore, because retry state is stored within <code>RunnableConfig</code>, invoking <code>SecureRunnable.handoff(self.secured_workflow, context, run_config)</code> ensures that accumulated violation counts and retry budgets persist across multi-agent handoffs (e.g., from a Triage Agent to a Remediation Agent) throughout the entire user request pipeline unless explicitly reset.</p>
+
+<h3>PDP Cache Invalidation Callback</h3>
+
+<p>When enterprise security policies or role assignments update dynamically in an external Policy Decision Point (such as Open Policy Agent), cached decisions and abuse throttles must not penalize newly authorized subjects. <code>ToolViolationHandler</code> automatically hooks into the PDP engine lifecycle via <code>pdp_engine.register_invalidation_callback(self.reset_abuse)</code>. Whenever the PDP flushes or invalidates policy bundles, abuse trackers reset state, ensuring legitimate operations proceed without stale throttling.</p>
+
+<hr />
+
+<h2>Escalation Thresholds and Threat Classifications</h2>
+
+<p>The policy enforcement lifecycle evaluates every tool violation against strict thresholds, mapping execution anomalies to standardized threat classifications:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Violation Pattern</th>
+      <th>Threshold Trigger</th>
+      <th>Mitigation Action</th>
+      <th>Audit Threat Classification</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Isolated Informational Denial</strong></td>
+      <td>Feedback count &le; <code>max_feedback_violations</code> (2)</td>
+      <td>Returns synthetic refusal envelope to model context; allows recovery attempt</td>
+      <td><code>TOOL_FEEDBACK_VIOLATION</code> (Notice)</td>
+    </tr>
+    <tr>
+      <td><strong>Mutative Tool Denial</strong></td>
+      <td>Any unauthorized write/action operation</td>
+      <td>Immediate hard abort; agent execution terminated without retries</td>
+      <td><code>TOOL_HARD_ABORT_TRIGGERED</code> (Security Alert)</td>
+    </tr>
+    <tr>
+      <td><strong>Turn-Level Retry Budget Breach</strong></td>
+      <td>Consecutive feedback count &gt; <code>max_feedback_violations</code> (2)</td>
+      <td><strong>Hard Abort:</strong> Escalates to hard stop, terminating agent loop immediately</td>
+      <td><code>EVENT_POLICY_BRUTE_FORCE_DETECTED</code> (Critical Alert)</td>
+    </tr>
+    <tr>
+      <td><strong>Parameter Fuzzing / Mutation</strong></td>
+      <td>Arguments mutated between consecutive denials (<code>prev_args != bound_args</code>)</td>
+      <td>Emits alert; continues tracking towards turn cap or hard abort</td>
+      <td><code>EVENT_PARAMETER_PRIVILEGE_ESCALATION</code> (Security Alert)</td>
+    </tr>
+    <tr>
+      <td><strong>Sliding-Window Denial Flood</strong></td>
+      <td>Denial count &ge; <code>max_denials</code> (3) within 60-second window</td>
+      <td><strong>Abuse Throttling:</strong> Immediately terminates turn and blocks cross-turn scans</td>
+      <td><code>EVENT_POLICY_BRUTE_FORCE_SCANNING</code> (Critical Alert)</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>Code Hardening: Orchestrating Anti-Loop Defenses in Your Enterprise Agents</h2>
+
+<p>Once tools in your enterprise application declare their mutability contracts and CEL parameter constraints with <code>@secured_tool</code> (as detailed in <a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html">Chapter 7: Guarding Tools and Enterprise APIs</a>), informational denials return soft refusals to the model. To prevent the model from cycling indefinitely or brute-forcing parameters, your application's agent orchestrators must configure violation handlers, track retry budgets, and wire fallback error boundaries. In the reference assistant, this defense is orchestrated across six focused steps:</p>
+
+<h3>Step 1: Externalizing Retry Budgets and Abuse Windows in Configuration</h3>
+
+<p>In your enterprise application, avoid hardcoding security thresholds. Bind configurable properties to allow operational adjustments across deployment environments:</p>
+
+<p><strong>app/config.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/config.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -21,6 +21,10 @@ DEFAULT_CACHE_L2_MAX_ENTRIES = 1000
+ 
+ DEFAULT_INGESTION_MODE = "STRICT_FAIL_CLOSED"
++DEFAULT_RETRY_MAX_VIOLATIONS = 3
++DEFAULT_ABUSE_WINDOW_SECONDS = 60.0
++DEFAULT_ABUSE_MAX_DENIALS = 3
++
+ DEFAULT_SPLUNK_HEC_URL = ""
+@@ -190,9 +194,18 @@ class AppConfig:
+     def ingestion_mode(self) -> str:
+         return self.get_property("security.ingestion.mode", DEFAULT_INGESTION_MODE)
+ 
++    @property
++    def retry_max_violations(self) -> int:
++        return int(self.get_property("security.retry.maxViolations", str(DEFAULT_RETRY_MAX_VIOLATIONS)))
++
++    @property
++    def abuse_window_seconds(self) -> float:
++        return float(self.get_property("security.abuse.windowSeconds", str(DEFAULT_ABUSE_WINDOW_SECONDS)))
++
++    @property
++    def abuse_max_denials(self) -> int:
++        return int(self.get_property("security.abuse.maxDenials", str(DEFAULT_ABUSE_MAX_DENIALS)))
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> The application exposes single-turn retry limits (default: 3 feedback retries before abort) and cross-turn sliding windows (default: max 3 denials in 60 seconds). Operators can tune these settings via properties files or environment variables without code redeployment.</p>
+
+<h3>Step 2: Initializing Trackers and ToolViolationHandler in Agent Setup</h3>
+
+<p>During agent initialization, instantiate the retry and abuse trackers and bind them into a <code>ToolViolationHandler</code>:</p>
+
+<p><strong>app/agents/remediation_agent.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/remediation_agent.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -53,6 +53,18 @@ class RemediationAgent:
+             self.model_class,
+             self.api_key
+         )
++        retry_tracker = RetryBudgetTracker.create(max_feedback_violations=config.retry_max_violations)
++        abuse_tracker = AbuseThrottleTracker.create(
++            window_seconds=config.abuse_window_seconds,
++            max_denials=config.abuse_max_denials,
++        )
++        self.violation_handler = ToolViolationHandler.create(
++            pdp_engine=get_pdp_engine(),
++            retry_tracker=retry_tracker,
++            abuse_tracker=abuse_tracker,
++        )
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> The agent constructs an invocation-scoped <code>RetryBudgetTracker</code> and a cross-turn <code>AbuseThrottleTracker</code>. Passing both to <code>ToolViolationHandler.create()</code> registers the PDP cache invalidation callback and unifies policy violation accounting.</p>
+
+<h3>Step 3: Encapsulating the Workflow with <code>with_violation_handler()</code></h3>
+
+<p>Wrap the agent's core execution method with <code>SecureRunnable.wrap()</code>, binding the violation handler and a declarative fallback builder:</p>
+
+<p><strong>app/agents/remediation_agent.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/remediation_agent.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -65,6 +77,16 @@ class RemediationAgent:
+         self.violation_handler = ToolViolationHandler.create(
+             pdp_engine=get_pdp_engine(),
+             retry_tracker=retry_tracker,
+             abuse_tracker=abuse_tracker,
+         )
++        self.secured_workflow = SecureRunnable.wrap(
++            runnable=self._execute_remediation,
++            pdp_engine=get_pdp_engine(),
++            agent_name="remediation_agent",
++            required_roles=TRIAGE_REQUIRED_ROLES,
++            min_clearance=TRIAGE_MIN_CLEARANCE,
++            target_tenant=ALLOWED_TENANTS,
++        ).with_violation_handler(
++            violation_handler=self.violation_handler,
++            fallback_builder=build_violation_fallback_report,
++        )
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> <code>.with_violation_handler()</code> attaches an LCEL error boundary around agent execution. When mutative tools or retry cap exhaustion raise <code>ToolExecutionDeniedError</code>, <code>SecureRunnable</code> intercepts the exception, records <code>sec:last_violation</code>, and delegates to <code>build_violation_fallback_report</code>.</p>
+
+<h3>Step 4: Propagating In-Band Config via Secure Handoff</h3>
+
+<p>At the public entry point, ensure callers supply or establish a <code>RunnableConfig</code> carrying the subject's identity before invoking the workflow via <code>SecureRunnable.handoff()</code>:</p>
+
+<p><strong>app/agents/remediation_agent.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/remediation_agent.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -133,13 +123,13 @@ class RemediationAgent:
+             RemediationReport: Report detailing remediation actions, root cause, and status.
+         """
+         logger.info(f"[RemediationAgent] Processing incident ticketId: {context.ticketId} via LLM ({self.model_name})")
+-        config: Optional[Dict[str, Any]] = args[0] if len(args) > 0 else kwargs.get("config")
+-        cfg_dict: Dict[str, Any] = config.get("configurable", {}) if isinstance(config, dict) else {}
+-        actions: List[str] = cfg_dict.setdefault("sec:actions", [])
+-        try:
+-            return self._execute_remediation(context, config=config)
+-        except ToolEntityValidationError as exc:
+-            return self._handle_tool_entity_validation_error(context, actions, exc)
++
++        run_config: Optional[Dict[str, Any]] = args[0] if len(args) > 0 else kwargs.get("config")
++        if run_config is None:
++            sec_identity = security_identity_from_context(context.securityContext)
++            run_config = IdentityBridge.create_runnable_config(sec_identity)
++
++        return SecureRunnable.handoff(self.secured_workflow, context, run_config)
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> <code>SecureRunnable.handoff()</code> replaces imperative error catching with structured LCEL execution. Storing <code>sec:retry_count</code> and <code>sec:prev_args</code> in-band ensures per-user isolation while carrying retry history across multi-agent handoffs.</p>
+
+<h3>Step 5: Enforcing Cross-Turn Abuse Checks at the Execution Boundary (Step 0 Gate)</h3>
+
+<p>Before rendering prompts, consulting vector stores, or initiating tool calls, check whether the caller is actively throttled by the sliding-window tracker:</p>
+
+<p><strong>app/agents/remediation_agent.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/remediation_agent.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -157,6 +147,20 @@ class RemediationAgent:
+         actions: List[str] = cfg_dict.setdefault("sec:actions", [])
+         raw_text_lower = context.rawTicketText.lower()
+ 
++        # Step 0: Check Cross-Turn Abuse Throttling State
++        caller_identity = IdentityBridge.extract_from_config(config)
++        now_ts = time.time()
++        if (
++            caller_identity is not None
++            and self.violation_handler is not None
++            and self.violation_handler.abuse_tracker.is_throttled(caller_identity.subject_id, now_ts)
++        ):
++            logger.warning(
++                f"[RemediationAgent] Caller '{caller_identity.subject_id}' is actively throttled by sliding-window abuse tracker."
++            )
++            throttle_resolution = ViolationResolution.create(..., should_abort=True)
++            return build_violation_fallback_report(context, throttle_resolution, config)
++
+         # Step 1: Consult Knowledge Base Runbooks
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> If a caller exceeds <code>abuse_max_denials</code> within the sliding window, Step 0 halts execution immediately. Zero model tokens are consumed, vector searches are bypassed, and the request is safely rejected.</p>
+
+<h3>Step 6: Constructing Deterministic Fallback Reports</h3>
+
+<p>Implement a declarative fallback builder to translate library <code>ViolationResolution</code> objects into your enterprise application's standard response schema:</p>
+
+<p><strong>app/agents/guardrail_tests_telemetry_helper.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/guardrail_tests_telemetry_helper.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -71,11 +86,43 @@ def build_remediation_report(
+      )
+  
+  
++def build_violation_fallback_report(
++    context: Any,
++    resolution: Any,
++    run_config: Optional[Dict[str, Any]],
++) -> RemediationReport:
++    """Declarative LCEL fallback builder converting a library ViolationResolution into a RemediationReport."""
++    cfg_dict = run_config.get("configurable", {}) if isinstance(run_config, dict) else {}
++    actions = list(cfg_dict.get("sec:actions", []))
++    actions.append(resolution.action_entry)
++
++    root_cause = resolution.root_cause
++    user_msg = resolution.user_message
++    remed_sec = resolution.remediation_security
++    remed_exec = resolution.remediation_execution
++    status_val = resolution.status
++
++    vh = cfg_dict.get("sec:violation_handler")
++    caller_id = IdentityBridge.extract_from_config(run_config)
++    tool_label = getattr(resolution, "tool_name", "tool")
++    if (
++        vh is not None
++        and hasattr(vh, "abuse_tracker")
++        and caller_id is not None
++        and vh.abuse_tracker.is_throttled(caller_id.subject_id, time.time())
++    ):
++        root_cause = ROOT_CAUSE_POLICY_BRUTE_FORCE
++        user_msg = f"Execution halted: Abuse throttle threshold exceeded (POLICY_BRUTE_FORCE_SCANNING on {tool_label})"
++        actions.append(f"Abuse throttle triggered: POLICY_BRUTE_FORCE_SCANNING on {tool_label}")
++        remed_sec = STATUS_POLICY_BLOCKED
++        remed_exec = STATUS_EXECUTION_ABORTED
++        status_val = STATUS_BLOCKED_BY_POLICY
++
++    actions, user_msg, rag_clearance_status = finalize_telemetry(actions, user_msg)
++    return build_remediation_report(context, root_cause, actions, status_val, user_msg, remed_sec=remed_sec, remed_exec=remed_exec, rag_clearance=rag_clearance_status)
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> The fallback builder converts security violations into valid application responses (e.g., <code>RemediationReport</code> with <code>remediation_security: BLOCKED_POLICY</code> and <code>remediation_execution: ABORTED</code>). This prevents unhandled 500 exceptions, shields internal error traces, and provides clean telemetry for client applications.</p>
+
+<hr />
+
+<h2>Verification Tests (Guardrail Tests)</h2>
+
+<p>Validate retry budget termination and brute-force loop halting using the project's standardized guardrail suite:</p>
+
+<ul>
+    <li>
+        <strong>Test 10: Policy Brute-Force &amp; Anti-Looping Protection (<code>10-policy-brute-force-retry-loop-halted.sh</code>)</strong><br />
+        Verifies that when a caller prompts multi-target brute-force service restarts across unauthorized servers (e.g., <code>finance-db-01</code>, <code>db-prod-01</code>, <code>app-prod-02</code>), the retry tracker halts execution, returning <code>remediation_sec=BLOCKED_POLICY</code> and <code>remediation_exec=ABORTED</code>.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/10-policy-brute-force-retry-loop-halted.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 29: Anti-Loop Denied Tool Persistent Retry Cap Termination (<code>29-anti-loop-retry-cap-terminated.sh</code>)</strong><br />
+        Injects a persistent retry scenario on a denied tool and asserts that the runner halts upon reaching the configured retry cap (<code>max_feedback_violations = 2</code>, terminating on attempt 3) and records an <code>EVENT_POLICY_BRUTE_FORCE_DETECTED</code> audit alert in <code>logs/security-audit.json</code>.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/29-anti-loop-retry-cap-terminated.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 31: Sliding-Window Cross-Turn Abuse Throttling (<code>31-sliding-window-abuse-throttling.sh</code>)</strong><br />
+        Simulates an attacker issuing repeated unauthorized requests across multiple distinct tickets/turns (e.g., scanning <code>web-prod-01</code>, <code>hr-app-01</code>, <code>db-prod-01</code>). Asserts that upon reaching the denial threshold (<code>max_denials = 3</code>), the abuse tracker emits a <code>POLICY_BRUTE_FORCE_SCANNING</code> critical SIEM alert on turn 3, immediately blocks execution on turn 4, and properly prunes expired denials once the sliding window (<code>window_seconds = 60.0</code>) elapses.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/31-sliding-window-abuse-throttling.sh</code></pre>
+</div>
+    </li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

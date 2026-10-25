@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 5: Security Labeling and Admission Control in the Ingestion Pipeline</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html" class="active"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 5: Security Labeling and Admission Control in the Ingestion Pipeline</h1>
+
+<p>Retrieval-Augmented Generation (RAG) is only as secure as the metadata stored inside the vector index. If document chunks are embedded without cryptographic boundaries, role tags, and multi-tenancy keys, downstream retrievers cannot reliably enforce authorization. Security labeling and admission control in the ingestion pipeline ensure that during the ETL (Extract, Transform, Load: a data processing pipeline that extracts raw data, transforms its structure, and loads it into a storage target) lifecycle, every chunk is stamped with a tamper-evident security envelope and validated against strict admission policies before embeddings are generated and stored.</p>
+
+<hr />
+
+<h2>The <code>sec:*</code> Chunk Metadata Envelope</h2>
+
+<p>Vector databases index flat key-value pairs alongside embeddings. To prevent namespace collisions with arbitrary source metadata (such as <code>page_number</code> or <code>author</code>), all access boundaries are unified under the reserved <code>sec:*</code> prefix:</p>
+
+<ul>
+    <li><strong><code>sec:schema_version</code>:</strong> Semantic schema version string (e.g., <code>"1.0"</code>).</li>
+    <li><strong><code>sec:tenant_id</code>:</strong> Mandatory partition identifier enforcing multi-tenant isolation.</li>
+    <li><strong><code>sec:document_id</code>:</strong> Unique identifier linking chunks to their root parent source.</li>
+    <li><strong><code>sec:chunk_index</code>:</strong> Zero-based sequential integer denoting the chunk's position in the document.</li>
+    <li><strong><code>sec:classification_level</code>:</strong> Hierarchical data classification tier (<code>PUBLIC</code>, <code>INTERNAL</code>, <code>CONFIDENTIAL</code>, <code>RESTRICTED</code>).</li>
+    <li><strong><code>sec:clearance_floor</code>:</strong> Numeric clearance rank (0 &le; PUBLIC &lt; 1 &le; INTERNAL &lt; 2 &le; CONFIDENTIAL &lt; 3 &le; RESTRICTED) used for fast numeric range pre-filtering.</li>
+    <li><strong><code>sec:allowed_roles</code>:</strong> List or delimited collection of RBAC roles entitled to read the chunk.</li>
+    <li><strong><code>sec:envelope_hash</code>:</strong> Cryptographic HMAC (Hash-based Message Authentication Code: a cryptographic signature verifying data integrity and authenticity) digest ensuring metadata fields cannot be altered inside the vector database.</li>
+</ul>
+
+<hr />
+
+<h2>Ingestion Lifecycle: Labeling, Enrichment &amp; Admission Control</h2>
+
+<p>The security labeling and admission pipeline executes across four deterministic stages implemented as LangChain <code>BaseDocumentTransformer</code> primitives:</p>
+
+<ol>
+    <li><strong>Baseline Validation (<code>DocumentSecurityTransformer</code>):</strong> Inspects the raw document for mandatory baseline attributes (e.g., <code>tenant_id</code>, baseline clearance) before text splitting.</li>
+    <li><strong>Document Chunking:</strong> Uses standard LangChain text splitters (e.g., <code>RecursiveCharacterTextSplitter</code>) to divide the document into chunks while inheriting parent metadata.</li>
+    <li><strong>Chunk Enrichment (<code>SecureDocumentChunkEnricher</code>):</strong> Scans chunk text for structural markdown headers (e.g., <code>## [CONFIDENTIAL]</code>) or invokes an external SPI (Service Provider Interface: an extensibility pattern allowing custom classes to plug into framework pipelines) to elevate classification tiers.</li>
+    <li><strong>Envelope Validation &amp; Signing (<code>SecurityEnvelopeValidator</code>):</strong> Validates all mandatory <code>sec:*</code> tags against the active policy schema and calculates the SHA-256 <code>sec:envelope_hash</code> signature.</li>
+</ol>
+
+<hr />
+
+<h2>Enrichment SPI and Monotonic Elevation</h2>
+
+<p>The enrichment stage supports custom DLP (Data Loss Prevention: automated software tools that detect and prevent the exposure of sensitive data) scanners, regex matchers, and structural header parsers via the <code>ChunkSecurityEnricherSPI</code>. All enrichers must adhere to the <strong>Monotonic Classification Invariant</strong>: an enricher can elevate a chunk to a higher classification tier, but it can never weaken the parent document's baseline classification.</p>
+
+<p><strong>security_adapter_langchain/ingestion.py</strong></p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_adapter_langchain/ingestion.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python"># security_adapter_langchain/ingestion.py
+from typing import Dict, Any
+from security_adapter_langchain.ingestion import ChunkSecurityEnricherSPI, ChunkEnrichmentContext
+from security_core.constants import (
+    SEC_CLASSIFICATION_LEVEL,
+    SEC_CLEARANCE_FLOOR,
+    CLASSIFICATION_CLEARANCE_MAP,
+)
+
+class HeadingClassificationEnricher(ChunkSecurityEnricherSPI):
+    """Enricher that elevates chunk classification based on structural Markdown headers."""
+
+    def enrich_chunk(self, context: ChunkEnrichmentContext) -> Dict[str, Any]:
+        envelope = dict(context.metadata)
+        parent_clearance = int(envelope.get(SEC_CLEARANCE_FLOOR, 0))
+
+        detected_tier = self._extract_heading_classification(context.text)
+        if detected_tier:
+            detected_clearance = CLASSIFICATION_CLEARANCE_MAP.get(detected_tier, 0)
+            # Monotonic Elevation Invariant: Never downgrade below parent baseline
+            if detected_clearance > parent_clearance:
+                envelope[SEC_CLASSIFICATION_LEVEL] = detected_tier
+                envelope[SEC_CLEARANCE_FLOOR] = detected_clearance
+
+        return envelope
+</code></pre>
+</div>
+
+<hr />
+
+<h2>Code Hardening: Enforcing Security Labeling and Admission Control</h2>
+
+<p>When hardening document ingestion in your enterprise application, replace unvalidated chunk splitters with an orchestrated <code>SecureVectorStoreIngestor</code>. In the reference assistant, this transformation is implemented in <code>app/agents/knowledge_base_store.py</code> across two focused stages:</p>
+
+<h3>Stage 1: Configuring Transformers and SPI Enrichers</h3>
+
+<p>Configure the baseline document metadata defaults and register SPI enrichers to automatically scan chunks for classification headings and sensitive credentials:</p>
+
+<p><strong>app/agents/knowledge_base_store.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/knowledge_base_store.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -143,15 +143,17 @@ class KnowledgeBaseStore:
++        transformer = DocumentSecurityTransformer.create(
++            default_classification=DEFAULT_CLASSIFICATION_PARAM,
++            default_roles=DEFAULT_ROLES_PARAM,
++            default_tenant=DEFAULT_TENANT_PARAM,
++            default_department=DEFAULT_DEPARTMENT_PARAM,
++            rules=[kb_security_rule],
++        )
++        spi_enrichers = [
++            HeadingClassificationEnricher.create(),
++            DlpSecretDetectionEnricher.create(),
++        ]
++        enricher = SecureDocumentChunkEnricher.create(
++            spi_enrichers=spi_enrichers,
++            secret_key=config.security_hmac_secret,
++            audit_manager=audit_mgr,
++        )
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> <code>DocumentSecurityTransformer</code> stamps mandatory baseline tags (tenant, roles, clearance) onto raw documents. <code>SecureDocumentChunkEnricher</code> executes registered SPI plugins—such as <code>HeadingClassificationEnricher</code> and <code>DlpSecretDetectionEnricher</code>—to detect inline sensitivity markers and elevate chunk classification monotonically.</p>
+
+<h3>Stage 2: Assembling the Ingestor with Cryptographic Validation</h3>
+
+<p>Next, instantiate the <code>SecurityEnvelopeValidator</code> to enforce schema compliance and sign chunks with HMAC digests, binding everything into <code>SecureVectorStoreIngestor</code>:</p>
+
+<p><strong>app/agents/knowledge_base_store.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/knowledge_base_store.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -160,13 +162,14 @@ class KnowledgeBaseStore:
++        validator = SecurityEnvelopeValidator.create(secret_key=config.security_hmac_secret)
++        text_splitter = SecureTextSplitter.create(
++            chunk_size=DEFAULT_CHUNK_SIZE,
++            chunk_overlap=DEFAULT_CHUNK_OVERLAP,
++        )
++        return SecureVectorStoreIngestor.create(
++            transformer=transformer,
++            enricher=enricher,
++            validator=validator,
++            ingestion_mode=ingestion_mode,
++            text_splitter=text_splitter,
++            audit_manager=audit_mgr,
++        )
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> The validator verifies that all required <code>sec:*</code> fields are present, verifies envelope integrity, and calculates <code>sec:envelope_hash</code> using HMAC-SHA256 before chunks enter vector storage. Any chunk failing schema checks is immediately rejected under strict fail-closed mode.</p>
+
+<hr />
+
+<h2>Admission Control &amp; Ingestion Policy Modes</h2>
+
+<p>When an unlabelled or malformed chunk reaches the validation boundary, the admission controller in <code>SecurityEnvelopeValidator</code> can be set to enforce one of three operational fallback policies configured via <code>SecureVectorStoreIngestor.create(..., ingestion_mode=...)</code> or the <code>security.ingestion.mode</code> application property. These modes are defined in <code>security_core.constants</code>:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Policy Mode</th>
+      <th>Library Constant &amp; Value</th>
+      <th>Behavior on Missing or Malformed Tags</th>
+      <th>Multi-Tenancy Impact</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Strict Fail-Closed</strong><br /><em>(Default)</em></td>
+      <td><code>INGEST_MODE_STRICT_FAIL_CLOSED</code><br />(<code>"STRICT_FAIL_CLOSED"</code>)</td>
+      <td>Rejects the offending chunk and aborts the entire document batch atomically. No partial data is written.</td>
+      <td>Preserved; unindexed fragments cannot leak.</td>
+    </tr>
+    <tr>
+      <td><strong>Everything Classified</strong><br /><em>(Quarantine Mode)</em></td>
+      <td><code>INGEST_MODE_EVERYTHING_CLASSIFIED</code><br />(<code>"EVERYTHING_CLASSIFIED"</code>)</td>
+      <td>Elevates unlabelled chunks to <code>RESTRICTED</code>, sets <code>sec:quarantined = True</code>, and allows batch completion.</td>
+      <td>Preserved; accessible only by top-clearance personnel.</td>
+    </tr>
+    <tr>
+      <td><strong>Everything Public</strong><br /><em>(Public Fallback)</em></td>
+      <td><code>INGEST_MODE_EVERYTHING_PUBLIC</code><br />(<code>"EVERYTHING_PUBLIC"</code>)</td>
+      <td>Defaults unlabelled chunks to <code>PUBLIC</code> (clearance 0) and permits standard read access.</td>
+      <td>Preserved; <code>sec:tenant_id</code> remains strictly isolated to prevent cross-tenant exposure.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>Verification Tests (Guardrail Tests)</h2>
+
+<p>Validate chunk classification, header parsing, monotonic elevation, and quarantine handling using the project's standardized guardrail suite:</p>
+
+<ul>
+    <li>
+        <strong>Test 01: Ingestion Envelope Validation Enforced (<code>01-ingestion-envelope-validation-enforced.sh</code>)</strong><br />
+        Verifies schema validation rules ensuring all required <code>sec:*</code> fields exist prior to embedding generation.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/01-ingestion-envelope-validation-enforced.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 02: Ingestion Header Classification Elevation (<code>02-ingestion-header-classification-elevation.sh</code>)</strong><br />
+        Tests the structural heading parser elevating chunk classification tiers when sensitive markdown headers (e.g., <code>## [CONFIDENTIAL]</code>) are detected.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/02-ingestion-header-classification-elevation.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 05: Ingestion Monotonic Classification Elevation (<code>05-ingestion-monotonic-classification-elevation.sh</code>)</strong><br />
+        Validates monotonic classification invariants, ensuring enrichers can elevate security tiers but cannot weaken parent document baselines.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/05-ingestion-monotonic-classification-elevation.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 07: Ingestion Unlabelled Chunk Quarantine Policy (<code>07-ingestion-unlabelled-chunk-quarantine-policy.sh</code>)</strong><br />
+        Verifies that chunks missing explicit classification tags are properly processed under quarantine rules during ETL.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/07-ingestion-unlabelled-chunk-quarantine-policy.sh</code></pre>
+</div>
+    </li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

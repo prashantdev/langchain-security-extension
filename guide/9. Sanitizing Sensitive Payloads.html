@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 9: Sanitizing Sensitive Payloads: Masking Secrets and PII in Execution Payloads</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html" class="active"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 9: Sanitizing Sensitive Payloads: Masking Secrets and PII in Execution Payloads</h1>
+
+<p>Language model agent workflows routinely handle sensitive data, including support tickets containing user credentials, customer contact details, financial numbers, and database connection strings. When Policy Enforcement Points (PEPs) intercept agent actions or emit telemetry to downstream monitoring pipelines, unredacted tool arguments and diagnostic logs can accidentally expose Personally Identifiable Information (PII) and enterprise secrets. Sanitizing sensitive payloads ensures all arguments, runtime attributes, retrieved documents, prompts, and telemetry snapshots pass through an in-flight redaction engine before events enter audit queues, LLMs, or downstream publishers.</p>
+
+<p>In this chapter, we use the incident response assistant (<code>langchain-enterprise-incident-assistant</code>) as a practical case study to demonstrate how to implement zero-leakage payload sanitization in your enterprise architecture using <code>langchain-security-extension</code>. We examine how to configure operational redaction scopes, mask sensitive tool arguments using <code>masked_params</code>, and wire an <code>AuditSanitizer</code> into your PDP engine lifecycle.</p>
+
+<hr />
+
+<h2>Implementor Choices: Engine and Scope</h2>
+
+<p>Enterprise applications differ in compliance mandates, Data Loss Prevention(DLP) infrastructure, and performance budgets. The security library empowers implementors with two foundational architectural choices:</p>
+
+<h3>1. Choose: Built-in Sanitization Engine vs. Custom SPI Provider</h3>
+<ul>
+    <li><strong>Option A &mdash; Built-in Zero-Dependency Engine (<code>BuiltInPiiSanitizer</code>):</strong> A high-performance, regex- and Luhn-based sanitizer provided out-of-the-box. It requires zero external ML or cloud dependencies, and scrubs emails, phone numbers, US SSNs, credit card numbers, IPv4 addresses, AWS/Google/GitHub/Slack keys, database URIs, JWTs, and private keys.</li>
+    <li><strong>Option B &mdash; Custom SPI Provider (<code>PiiSanitizerSPI</code>):</strong> Enterprise architectures utilizing specialized DLP engines (e.g., Presidio, AWS Comprehend, Nightfall, or on-prem hardware DLP sidecars) can implement the <code>PiiSanitizerSPI</code> interface and register it via <code>set_pii_sanitizer()</code> without altering the core security framework. Crucially, the library offers the architectural benefit of a <strong>single point of sanitization</strong>: rather than repetitively instrumenting scrubbing hooks across disparate agents, tool callables, vector retrievers, and loggers, implementors integrate their DLP logic once, and the framework uniformly applies it across all execution and telemetry boundaries.</li>
+</ul>
+
+<h3>2. Choose: Operational Redaction Scope - AUDIT_ONLY vs FULL_IN_FLIGHT, or DISABLED</h3>
+<ul>
+    <li><strong>Option A &mdash; <code>AUDIT_ONLY</code> (Default):</strong> Redacts sensitive fields, credentials, and PII strictly within audit event snapshots, diagnostic logs, and SIEM telemetry. Raw runtime prompts and tool exchanges in memory remain unmodified for minimum latency.</li>
+    <li><strong>Option B &mdash; <code>FULL_IN_FLIGHT</code>:</strong> Performs continuous, one-way (irreversible) redaction across all operational strings: inbound prompts entering <code>SecureRunnable</code>, outbound model responses, tool input arguments, tool return outputs, and retrieved vector store document chunks (<code>page_content</code>), in addition to audit logs.
+        <p>In practice, <code>FULL_IN_FLIGHT</code> activates PEP-level interceptors: <code>SecureRunnable</code> executes <code>_sanitize_inbound_input()</code> on raw prompts and <code>_sanitize_outbound_output()</code> on model responses; <code>@secured_tool</code> scrubs keyword arguments before invoking functions and scrubs return values; and <code>VectorStoreRetrieverSecurityWrapper</code> scrubs <code>page_content</code> across retrieved candidate chunks before injecting them into prompt context.</p>
+        <blockquote>
+            <p><strong>Latency &amp; Reconstruction Notice:</strong> <br/>
+                <code>FULL_IN_FLIGHT</code> performs a one-way redaction. If you want two-way entity reconstruction upon return of the model response, use an external library or custom DLP vault. <br/>
+                Continuous in-flight scanning introduces latency overhead across every execution stage; if your application is performance-critical, consider an optimized or hardware-accelerated custom <code>PiiSanitizerSPI</code>.</p>
+        </blockquote>
+    </li>
+    <li><strong><code>DISABLED</code>:</strong> Disables sanitization routines (intended strictly for isolated offline benchmark environments).</li>
+</ul>
+
+<hr />
+
+<h2>The Three-Stage In-Flight Sanitization Pipeline</h2>
+
+<p>To eliminate data leakage while preserving operational observability, the sanitization pipeline evaluates payloads across three deterministic processing stages:</p>
+
+<ol>
+    <li><strong>Stage 1: Key-Name &amp; Annotation Masking:</strong> Inspects dictionary keys against a comprehensive registry of sensitive attribute names (e.g., <code>password</code>, <code>secret</code>, <code>token</code>, <code>api_key</code>, <code>ssn</code>, <code>credit_card</code>, <code>email</code>, <code>phone</code>, <code>iban</code>, <code>dob</code>) and replaces their values directly with <code>"[REDACTED]"</code>.</li>
+    <li><strong>Stage 2: Comprehensive Regex &amp; Algorithmic Validator Engine:</strong> Evaluates unmasked string values against deterministic regular expressions and algorithmic checks:
+        <ul>
+            <li><strong>Emails:</strong> Standard RFC compliant address detection.</li>
+            <li><strong>Credit Cards (PAN):</strong> Candidate 13&ndash;19 digit card numbers validated via the <strong>Luhn checksum algorithm</strong>; numbers failing Luhn (such as tracking or invoice IDs) remain untouched.</li>
+            <li><strong>Phone Numbers:</strong> Formatted international/domestic phone numbers, or unformatted 10-digit numbers <em>in close proximity (within 40 characters) to telephone keywords</em> (<code>phone</code>, <code>telephone</code>, <code>fone</code>, <code>fon</code>, case-insensitive). This strictly avoids corrupting 10-digit Unix timestamps or internal identifiers.</li>
+            <li><strong>US SSNs:</strong> Standard delimited 9-digit social security patterns (e.g., <code>123-45-6789</code>), or unformatted 9-digit numbers <em>in close proximity (within 40 characters) to SSN keywords</em> (e.g., <code>ssn</code>, <code>social security</code>, <code>social_sec</code>, case-insensitive). This proximity disambiguation strictly prevents falsely redacting arbitrary 9-digit purchase order numbers, employee IDs, or database primary keys.</li>
+            <li><strong>Cloud Secrets &amp; Keys:</strong> AWS access keys (<code>AKIA...</code> / <code>ASIA...</code>), Google API keys (<code>AIza...</code>), GitHub tokens (<code>ghp_...</code>), Slack tokens (<code>xoxb-...</code>), JWTs, private key PEM blocks, and database connection URIs.</li>
+        </ul>
+    </li>
+    <li><strong>Stage 3: Payload Size Truncation &amp; Normalization:</strong> Enforces a maximum character cap per attribute (default: 2048 characters) appending <code>"...[TRUNCATED]"</code> to prevent Denial of Service (DoS) and buffer saturation in log consumers.</li>
+</ol>
+
+<blockquote>
+    <p><strong>Sanitized Diagnostic Reasoning:</strong> In addition to structured payload dictionaries, human-readable strings such as <code>AuditEvent.diagnostic_reason</code> are automatically sanitized before event dispatch. This guarantees that rejection explanations and exception messages echoing invalid user inputs (such as rejected cleartext passwords or malformed bearer tokens) never leak into downstream SIEM logs.</p>
+    <p><strong>Zero-Token Disclosure Principle:</strong> Under <code>AUDIT_ONLY</code> mode, unstructured prompt tokens are omitted from telemetry logs; only structural execution metadata (action, resource, sanitized parameters, diagnostic reasons, and policy decisions) are persisted.</p>
+</blockquote>
+
+<hr />
+
+<h2>The Service Provider Interface (SPI) Architecture</h2>
+
+<p>The sanitization subsystem is decoupled into a dedicated module <code>security_core.pii</code>. By adopting a Service Provider Interface (SPI), the library establishes a <strong>single point of sanitization</strong> across the application lifecycle: implementors plug in their custom or enterprise DLP solution in one centralized location, and the framework automatically coordinates scrubbing across all execution entry points, tool invocations, RAG retrievers, and audit publishers. Implementors can inspect the active scope and swap the active provider dynamically:</p>
+
+<p>File<br /><strong>security_core/pii.py</strong></p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_core/pii.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python"># security_core/pii.py
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional, Set
+
+class PiiContext:
+    """Contextual metadata passed during PII sanitization lifecycle stages."""
+    def __init__(self, stage: str, tenant_id: Optional[str], subject_id: Optional[str],
+                 resource_id: Optional[str], metadata: Optional[Dict[str, Any]]):
+        self.stage = stage
+        self.tenant_id = tenant_id
+        self.subject_id = subject_id
+        self.resource_id = resource_id
+        self.metadata = metadata or {}
+
+class PiiSanitizerSPI(ABC):
+    """Service Provider Interface (SPI) for PII and credential sanitization."""
+
+    @abstractmethod
+    def sanitize_text(self, text: str, context: Optional[PiiContext], *args: Any, **kwargs: Any) -> str:
+        """Sanitize sensitive entities in raw text strings."""
+        pass
+
+    @abstractmethod
+    def sanitize_payload(self, payload: Dict[str, Any], context: Optional[PiiContext], *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        """Recursively sanitize a dictionary payload."""
+        pass
+
+# Global Registry Hooks
+def get_pii_sanitizer() -> PiiSanitizerSPI: ...
+def set_pii_sanitizer(sanitizer: PiiSanitizerSPI) -> None: ...
+def get_pii_scope() -> str: ...
+def set_pii_scope(scope: str) -> None: ...
+</code></pre>
+</div>
+
+<h3>PII Sanitization Lifecycle Stages</h3>
+
+<p>Every sanitization invocation is tagged with a deterministic lifecycle stage (<code>PiiStage</code>), enabling custom SPI providers to apply context-aware DLP policies based on where data is flowing:</p>
+
+<ul>
+    <li><code>PII_STAGE_AUDIT_PAYLOAD</code> (<code>"audit_payload"</code>): Redacts structured metadata snapshots and diagnostic reason strings prior to SIEM and log dispatch.</li>
+    <li><code>PII_STAGE_INBOUND_PROMPT</code> (<code>"inbound_prompt"</code>): Redacts raw user input prompts entering <code>SecureRunnable</code> before LLM reasoning.</li>
+    <li><code>PII_STAGE_OUTBOUND_RESPONSE</code> (<code>"outbound_response"</code>): Redacts LLM completions and agent output responses before returning them to callers.</li>
+    <li><code>PII_STAGE_TOOL_ARGUMENT</code> (<code>"tool_argument"</code>): Redacts keyword arguments bound to tool callables before execution.</li>
+    <li><code>PII_STAGE_TOOL_OUTPUT</code> (<code>"tool_output"</code>): Redacts strings, dictionaries, or lists returned by tool functions.</li>
+    <li><code>PII_STAGE_RETRIEVAL_DOCUMENT</code> (<code>"retrieval_document"</code>): Redacts <code>page_content</code> within vector database chunks retrieved during RAG pipelines.</li>
+</ul>
+
+<hr />
+
+<h2>Configuring Redaction Modes in Application</h2>
+
+<p>In enterprise applications, the scope is configured via <code>config.properties</code> and read through <code>app/config.py</code> during security bootstrap:</p>
+
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (CONFIG)</span>
+      <span class="code-filename">config.properties</span>
+    </div>
+    <span class="code-lang">PROPERTIES</span>
+  </div>
+  <pre><code class="language-properties"># config.properties
+# Options: audit_only (default), full_in_flight, disabled
+security.pii.redaction.scope=audit_only
+</code></pre>
+</div>
+
+<p>The configuration property is exposed in <code>app/config.py</code> (you can inspect the full implementation in <code>app/config.py</code> of the assistant):</p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/config.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">--- a/app/config.py
++++ b/app/config.py
+@@ -20,6 +20,7 @@ DEFAULT_ABUSE_WINDOW_SECONDS = 60.0
+ DEFAULT_ABUSE_MAX_DENIALS = 3
++DEFAULT_PII_REDACTION_SCOPE = "audit_only"
+ 
+@@ -170,4 +171,7 @@ class AppConfig:
++    @property
++    def pii_redaction_scope(self) -> str:
++        return self.get_property("security.pii.redaction.scope", DEFAULT_PII_REDACTION_SCOPE)
+</code></pre>
+</div>
+
+<p>New File: <strong>app/security/security_integration.py</strong></p>
+
+<p>In your application, configure the audit sanitizer during PDP engine assembly. You can inspect the full implementation in <code>app/security/security_integration.py</code> of the assistant.</p>
+
+<p><strong>Step 1: Creating AuditSanitizer and Wiring into AuditManager</strong></p>
+<p>Sensitive credential field names are passed to <code>AuditSanitizer.create()</code>, which is then attached directly to the <code>AuditManager</code>:</p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (NEW FILE)</span>
+      <span class="code-filename">app/security/security_integration.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">        # app/security/security_integration.py
+        # Configure AuditSanitizer with credential field names to mask in telemetry
+        sanitizer = AuditSanitizer.create(
+            masked_fields={"password", "secret", "token", "api_key", "apikey", "credential", "authorization"}
+        )
+        audit_publishers = [
+            JsonFileAuditLogger.create(DEFAULT_AUDIT_LOG_FILE),
+        ]
+        audit_manager = AuditManager.create(
+            publishers=audit_publishers,
+            sanitizer=sanitizer,
+        )</code></pre>
+</div>
+
+<p><strong>Step 2: Activating the PII Redaction Scope and Lifecycle Cleanup</strong></p>
+<p>The configured redaction scope (e.g. <code>audit_only</code> or <code>full_in_flight</code>) is activated globally during engine bootstrap, and reset during engine teardown:</p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (NEW FILE)</span>
+      <span class="code-filename">app/security/security_integration.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">        # Set global PII redaction scope from application configuration
+        set_pii_scope(config.pii_redaction_scope)
+        _PDP_ENGINE_INSTANCE = engine
+
+def reset_pdp_engine() -> None:
+    """Resets cached singleton PDP engine and cleans up PII registry states."""
+    global _PDP_ENGINE_INSTANCE, _REMOTE_PDP_ADAPTER_INSTANCE, _OPA_INVALIDATION_HANDLER_INSTANCE
+    _PDP_ENGINE_INSTANCE = None
+    _REMOTE_PDP_ADAPTER_INSTANCE = None
+    _OPA_INVALIDATION_HANDLER_INSTANCE = None
+    reset_pii_scope()
+    reset_pii_sanitizer()</code></pre>
+</div>
+
+
+<hr />
+
+<h2>Redaction Rules and Masking Patterns</h2>
+
+<p>The built-in engine applies deterministic redaction rules based on field names and content patterns:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Category</th>
+      <th>Detection Trigger</th>
+      <th>Replacement Token</th>
+      <th>Example Input &rarr; Output</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Named Credential Keys</strong></td>
+      <td>Key matches <code>password</code>, <code>token</code>, <code>api_key</code>, <code>secret</code>, <code>ssn</code>, etc.</td>
+      <td><code>[REDACTED]</code></td>
+      <td><code>{"password": "secret123"}</code> &rarr; <code>{"password": "[REDACTED]"}</code></td>
+    </tr>
+    <tr>
+      <td><strong>Bearer &amp; JWT Tokens</strong></td>
+      <td>Base64 three-part signature or <code>Bearer &lt;token&gt;</code> prefix</td>
+      <td><code>[REDACTED]</code> or <code>bearer [REDACTED]</code></td>
+      <td><code>"Bearer eyJhbGciOi..."</code> &rarr; <code>"bearer [REDACTED]"</code></td>
+    </tr>
+    <tr>
+      <td><strong>Cloud IAM Keys</strong></td>
+      <td>AWS (<code>AKIA...</code>), Google (<code>AIza...</code>), GitHub (<code>ghp_...</code>), Slack</td>
+      <td><code>[REDACTED]</code></td>
+      <td><code>"AKIAIOSFODNN7EXAMPLE"</code> &rarr; <code>"[REDACTED]"</code></td>
+    </tr>
+    <tr>
+      <td><strong>Database URIs</strong></td>
+      <td>URI syntax matching user/password strings</td>
+      <td><code>scheme://user:[REDACTED]@host...</code></td>
+      <td><code>"postgres://admin:pass1@db:5432"</code> &rarr; <code>"postgres://admin:[REDACTED]@db:5432"</code></td>
+    </tr>
+    <tr>
+      <td><strong>Credit Card Numbers (PAN)</strong></td>
+      <td>13&ndash;19 digits passing Luhn checksum verification</td>
+      <td><code>[REDACTED]</code></td>
+      <td><code>"4111-1111-1111-1111"</code> &rarr; <code>"[REDACTED]"</code><br /><em>(Random non-card numbers untouched)</em></td>
+    </tr>
+    <tr>
+      <td><strong>Phone Numbers</strong></td>
+      <td>Delimited phone numbers OR 10-digit numbers near <code>(tele)phone</code> / <code>fon(e)</code></td>
+      <td><code>[REDACTED]</code></td>
+      <td><code>"Call phone: 9876543210"</code> &rarr; <code>"Call phone: [REDACTED]"</code><br /><em>(Unix timestamps like <code>1792134595</code> untouched)</em></td>
+    </tr>
+    <tr>
+      <td><strong>US SSNs &amp; Emails</strong></td>
+      <td>Standard delimited SSN, undelimited SSN (with keyword proximity), or RFC email format</td>
+      <td><code>[REDACTED]</code></td>
+      <td><code>"user@example.com"</code> &rarr; <code>"[REDACTED]"</code></td>
+    </tr>
+    <tr>
+      <td><strong>Oversized Strings</strong></td>
+      <td>String exceeding configured <code>max_chars</code> cap (default: 2048)</td>
+      <td>Truncated string + <code>...[TRUNCATED]</code></td>
+      <td>Lengthy memory dumps or terminal buffers</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>Code Hardening: Masking Sensitive Tool Execution Parameters</h2>
+
+<p>To register sensitive parameter names for Stage 1 redaction, declare <code>masked_params</code> in the <code>@secured_tool</code> decorator within <code>app/agents/infrastructure_tools.py</code>:</p>
+
+<blockquote>
+    <p><strong>Operational Scope Qualification:</strong> Under default <code>AUDIT_ONLY</code> mode, in-memory tool arguments remain unmodified during execution for minimal latency, while <code>masked_params</code> ensures those parameters are redacted to <code>"[REDACTED]"</code> when captured in PDP evaluation descriptors and audit log records. Active in-memory argument scrubbing before execution enters the tool function occurs only when <code>FULL_IN_FLIGHT</code> scope is enabled (<code>security.pii.redaction.scope=full_in_flight</code>).</p>
+</blockquote>
+
+<p>You can inspect the full implementation in <code>app/agents/infrastructure_tools.py</code> of the assistant.</p>
+
+<p><strong>Defining Masked Parameters and Applying to Mutative Tools:</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/infrastructure_tools.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -10,6 +10,8 @@ logger = logging.getLogger("agent.infratools")
++MASKED_TOOL_PARAMS: List[str] = ["password", "token", "secret", "api_key", "credential"]
+ 
+@@ -148,8 +200,15 @@ class InfrastructureTools:
++    @secured_tool(
++        required_roles=[],
++        min_clearance=CLEARANCE_STANDARD,
++        cel_expression=CEL_RESET_USER_PASSWORD,
++        is_mutative=True,
++        masked_params=MASKED_TOOL_PARAMS,
++    )
+     def reset_user_password(
+             self,
+             email: str,
++            security_identity: Optional[SecurityIdentity],
+             *args: Any,
+             **kwargs: Any,
+     ) -> str:</code></pre>
+</div>
+
+<hr />
+
+<h2>How the Library Intercepts and Scrubs Telemetry (Informative)</h2>
+
+<p>The library's <code>AuditManager</code> automatically executes the active PII sanitization pipeline on all diagnostic messages and dictionary payloads prior to queueing and dispatching events to registered publishers:</p>
+
+<p><strong>security_core/audit.py</strong></p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_core/audit.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python"># Built-in behavior in langchain-security-extension (no user edits required)
+class AuditManager:
+    def record_event(self, event: AuditEvent) -> None:
+        """Execute in-flight sanitization and non-blocking dispatch to ring buffer."""
+        if get_pii_scope() != PII_SCOPE_DISABLED:
+            ctx = PiiContext.create(
+                PII_STAGE_AUDIT_PAYLOAD,
+                event.tenant_id,
+                event.subject_id,
+                event.target_resource,
+                {"action": event.action, "enforcement_point": event.enforcement_point},
+            )
+            sanitizer = get_pii_sanitizer()
+            if isinstance(event.payload_snapshot, dict):
+                event.payload_snapshot = sanitizer.sanitize_payload(event.payload_snapshot, ctx)
+            if isinstance(event.diagnostic_reason, str):
+                event.diagnostic_reason = sanitizer.sanitize_text(event.diagnostic_reason, ctx, DEFAULT_PAYLOAD_MAX_CHARS)
+
+        for pub in self._publishers:
+            pub.publish(event)
+</code></pre>
+</div>
+
+<p>Notice that <code>event.diagnostic_reason</code> is explicitly passed through <code>sanitizer.sanitize_text()</code>, ensuring that human-readable error messages and policy denial feedback never expose cleartext credentials or sensitive strings to downstream subscribers.</p>
+
+<p>Furthermore, when <code>FULL_IN_FLIGHT</code> scope is active, sanitization hooks run across all PEP components in the execution flow:</p>
+<ul>
+    <li><strong><code>SecureRunnable</code>:</strong> Intercepts raw prompts before agent execution via <code>_sanitize_inbound_input()</code> (<code>PII_STAGE_INBOUND_PROMPT</code>) and scrubs agent outputs before returning them to callers via <code>_sanitize_outbound_output()</code> (<code>PII_STAGE_OUTBOUND_RESPONSE</code>).</li>
+    <li><strong><code>@secured_tool</code>:</strong> Intercepts invocation keyword arguments via <code>sanitizer.sanitize_payload()</code> (<code>PII_STAGE_TOOL_ARGUMENT</code>) before invoking tool logic, and scrubs tool return values (<code>PII_STAGE_TOOL_OUTPUT</code>).</li>
+    <li><strong><code>VectorStoreRetrieverSecurityWrapper</code>:</strong> Scrubs <code>doc.page_content</code> on all candidate chunks passing clearance checks (<code>PII_STAGE_RETRIEVAL_DOCUMENT</code>) before injecting them into prompt context.</li>
+</ul>
+
+<hr />
+
+<h2>Verification Tests (Guardrail Tests)</h2>
+
+<p>Validate field redaction, regex credential scrubbing, phone proximity detection, and telemetry truncation using the project's standardized guardrail suite:</p>
+
+<ul>
+    <li>
+        <strong>Test 24: SIEM Security Audit Logging &amp; Data Sanitization (<code>24-siem-audit-sanitization-enforced.sh</code>)</strong><br />
+        Verifies that live HTTP requests containing synthetic secret parameters emit sanitized JSON events to <code>logs/security-audit.json</code> without leaking cleartext credentials.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/24-siem-audit-sanitization-enforced.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 25: PII Regex and Masked Annotation Scrubbing (<code>25-pii-regex-and-masked-annotation-scrubbing.sh</code>)</strong><br />
+        Verifies that annotation-driven field masking and credential regexes scrub sensitive tokens from tool execution parameters.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/25-pii-regex-and-masked-annotation-scrubbing.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 30: Telemetry Sanitization Raw Event Verified (<code>30-telemetry-sanitization-raw-event-verified.sh</code>)</strong><br />
+        Confirms that all raw event dictionaries (<code>AuditEvent.to_dict()</code>), nested parameters, and diagnostic strings scrub secrets while preserving Unix timestamps and valid IDs.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/30-telemetry-sanitization-raw-event-verified.sh</code></pre>
+</div>
+    </li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

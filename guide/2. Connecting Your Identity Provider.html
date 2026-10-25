@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 2: Connecting Your Identity Provider: Passing User Credentials into LangChain</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html" class="active"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 2: Connecting Your Identity Provider: Passing User Credentials into LangChain</h1>
+
+<p>Enterprise applications authenticate callers at the network perimeter using Identity Providers (IdPs) such as Okta, Keycloak, Auth0, or Microsoft Entra ID. Once a perimeter gateway validates a session cookie or JSON Web Token (JWT), downstream AI components must know who initiated the execution. Bridging this identity into LangChain requires an <code>IdentityBridge</code> to extract verified claims, map them into an immutable <code>SecurityIdentity</code>, and inject them into LangChain's native <code>RunnableConfig</code> execution configuration.</p>
+
+<hr />
+
+<h2>Connecting Your Identity Provider at the Perimeter</h2>
+
+<p>Before claims reach LangChain, the application or API gateway integrates directly with the corporate Identity Provider via standard OpenID Connect (OIDC) and OAuth 2.0 protocols:</p>
+
+<ul>
+    <li><strong>OIDC Discovery &amp; JWKS Key Rotation:</strong> During startup, the perimeter service fetches the IdP's metadata from <code>/.well-known/openid-configuration</code> to retrieve the JSON Web Key Set (JWKS) endpoint (<code>jwks_uri</code>). Public keys are cached locally and refreshed periodically to handle automated key rotation.</li>
+    <li><strong>Cryptographic Signature Verification:</strong> Inbound HTTP requests supply an <code>Authorization: Bearer &lt;token&gt;</code> header. The gateway or framework security filter inspects the token header for the matching key ID (<code>kid</code>), verifies the asymmetric signature (e.g., RS256 or ES256) using the cached public key, and validates token expiration (<code>exp</code>).</li>
+    <li><strong>Standard Claims Validation:</strong> The perimeter verifies core standard claims, ensuring the token issuer (<code>iss</code>) matches the trusted IdP authority and the audience (<code>aud</code>) matches the application client identifier.</li>
+    <li><strong>Hand-off to the AI Application:</strong> Once cryptographic integrity is established, the raw verified claims dictionary (including subject <code>sub</code>, <code>roles</code>, <code>tenantId</code>, and organizational attributes) is handed to the application's <code>IdentityBridge</code> to be transformed into execution context for LangChain.</li>
+</ul>
+
+<hr />
+
+<h2>The Role of the Identity Bridge</h2>
+
+<p>The <code>IdentityBridge</code> serves as the translation layer between web frameworks (such as FastAPI or Flask) and LangChain runtimes:</p>
+
+<ul>
+    <li><strong>Token &amp; Header Extraction:</strong> Extracts verified subject claims and distributed tracing context (such as W3C <code>traceparent</code> headers) from incoming HTTP requests.</li>
+    <li><strong>Claim Normalization:</strong> Translates enterprise claims into standardized fields for multi-tenancy, clearance ranks, and RBAC (Role-Based Access Control) groups.</li>
+    <li><strong>Immutable Packaging:</strong> Emits an immutable <code>SecurityIdentity</code> that downstream agents and tools cannot alter during execution.</li>
+    <li><strong>Native Context Propagation:</strong> Attaches caller context directly to LangChain's <code>RunnableConfig</code> under <code>config["configurable"]["security_identity"]</code>, avoiding fragile thread-local storage across asynchronous agent turns.</li>
+</ul>
+
+<hr />
+
+<h2>Anatomy of <code>SecurityIdentity</code></h2>
+
+<p>Caller identity is consolidated into an immutable data structure before reaching any LangChain component:</p>
+
+<p><strong>security_core/identity.py</strong></p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_core/identity.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">class SecurityIdentity:
+    """Immutable caller identity envelope containing authenticated attributes."""
+
+    def __init__(
+        self,
+        subject_id: str,
+        tenant_id: str,
+        roles: Set[str],
+        clearance_level: int,
+        department_id: str,
+        attributes: Dict[str, Any],
+    ):
+        self._subject_id = subject_id
+        self._tenant_id = tenant_id
+        self._roles = frozenset(roles)
+        self._clearance_level = clearance_level
+        self._department_id = department_id
+        self._attributes = dict(attributes)
+</code></pre>
+</div>
+
+<ul>
+    <li><strong><code>subject_id</code>:</strong> The primary caller identifier (e.g., the JWT <code>sub</code> claim or corporate email).</li>
+    <li><strong><code>tenant_id</code>:</strong> The organizational boundary key, essential for preventing cross-tenant data leakage.</li>
+    <li><strong><code>roles</code>:</strong> An immutable set of RBAC groups (e.g., <code>{"ROLE_DEVOPS_ENGINEER", "ROLE_USER"}</code>) stored internally as a <code>frozenset</code>.</li>
+    <li><strong><code>clearance_level</code>:</strong> A numeric rank (0 &le; PUBLIC &lt; 1 &le; INTERNAL &lt; 2 &le; CONFIDENTIAL &lt; 3 &le; RESTRICTED) used for hierarchical vector chunk gating.</li>
+    <li><strong><code>department_id</code>:</strong> Organizational department key used for departmental policy constraints.</li>
+    <li><strong><code>attributes</code>:</strong> Validated operational tags (e.g., distributed <code>trace_id</code>, <code>span_id</code>) consumed by policy rules and audit loggers.</li>
+</ul>
+
+<blockquote>
+    <p><strong>Immutability Guarantee:</strong> <code>SecurityIdentity</code> protects caller integrity by encapsulating attributes behind read-only property getters and storing roles within an immutable <code>frozenset</code>. Untrusted model outputs, prompt injections, or child runnables cannot mutate caller attributes or escalate roles during the execution lifecycle.</p>
+</blockquote>
+
+<hr />
+
+<h2>Role-to-Clearance Rank Mapping (<code>CLEARANCE_RANK_MAP</code>)</h2>
+
+<p>Enterprise Identity Providers emit role assignments as arbitrary string values or LDAP/AD group memberships (for example, <code>ROLE_ADMIN</code>, <code>ROLE_DEVOPS_ENGINEER</code>, or <code>ROLE_USER</code>). However, fine-grained access control in LangChain—such as vector database pre-filtering and tool parameter constraints—evaluates hierarchical data classifications using monotonic integer ranks. Example:</p>
+
+<p style="text-align: center; font-weight: bold; margin: 16px 0;">
+    0 (PUBLIC / UNAUTHENTICATED) &lt; 1 (STANDARD / INTERNAL) &lt; 2 (SECRET / CONFIDENTIAL) &lt; 3 (TOP_SECRET / RESTRICTED)
+</p>
+
+<p>To bridge this difference, <code>IdentityBridge.build_identity_from_claims()</code> accepts a <code>clearance_rank_map</code> dictionary (such as <code>CLEARANCE_RANK_MAP</code>). The bridge inspects inbound role claims and resolves the user's active clearance rank by evaluating the maximum rank corresponding to their assigned roles (or applying a configured <code>default_clearance</code>). This normalizes disparate enterprise group naming schemes into consistent numeric clearance tiers across all downstream agents, retrievers, and tools.</p>
+
+<hr />
+
+<h2>Context Propagation via <code>RunnableConfig</code></h2>
+
+<p>Traditional web patterns rely on session cookies or thread-local storage, both of which fail across asynchronous event loops, background worker queues, and multi-agent transfers. LangChain resolves this natively through LCEL (LangChain Expression Language) execution configs. Passing caller context under <code>config["configurable"]["security_identity"]</code> ensures caller identity flows deterministically into every nested prompt, tool call, and vector retriever query without relying on global variables.</p>
+
+<p>During downstream execution, <code>IdentityBridge.resolve_identity()</code> resolves caller context through a deterministic three-tier lookup sequence: it prioritizes an explicit candidate passed in <code>RunnableConfig</code>, falls back to the current async task context via <code>SecurityContextHolder</code> (using Python <code>contextvars</code>), and ultimately defaults to an unprivileged <code>SecurityIdentity.anonymous()</code> (clearance 0, empty roles) to maintain fail-closed security.</p>
+
+<hr />
+
+<h2>Code Hardening: Implementing the Identity Bridge and Router Binding</h2>
+
+<p>When hardening your enterprise application, you bridge your perimeter authentication filter to LangChain runtimes by replacing ad-hoc claim parsing with <code>IdentityBridge</code>, and binding the resulting identity into your LangChain invocation configs.</p>
+
+<h3>1. Extracting Claims into <code>SecurityIdentity</code></h3>
+
+<p>In your web authentication middleware or endpoint security dependency, pass the verified token claims dictionary to <code>IdentityBridge.build_identity_from_claims()</code>. In the reference assistant, this transformation is implemented in <code>app/security/auth.py</code>, replacing fragile manual role string-splitting with normalized claims translation:</p>
+
+<p><strong>app/security/auth.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/security/auth.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -80,20 +80,18 @@ def extract_security_context_from_request(
+-            roles = []
+-            if isinstance(raw_roles, str):
+-                roles = [r.strip() for r in raw_roles.split(",") if r.strip()]
+-            elif isinstance(raw_roles, list):
+-                for item in raw_roles:
+-                    if isinstance(item, str):
+-                        roles.extend([r.strip() for r in item.split(",") if r.strip()])
++            from security_core.identity import IdentityBridge
++            from app.security.security_integration import CLEARANCE_RANK_MAP
++
++            default_rank = CLEARANCE_RANK_MAP.get(CLEARANCE_UNAUTHENTICATED, 0)
++            identity = IdentityBridge.build_identity_from_claims(
++                claims=payload,
++                clearance_rank_map=CLEARANCE_RANK_MAP,
++                default_clearance=default_rank,
++            )
++            roles = list(identity.roles)
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> The diff replaces manual string-splitting of roles with <code>IdentityBridge.build_identity_from_claims()</code>. The bridge extracts the caller subject, resolves the maximum clearance rank mapped from their assigned roles via <code>CLEARANCE_RANK_MAP</code>, and encapsulates caller claims into an immutable <code>SecurityIdentity</code>. You can review the full implementation in <code>app/security/auth.py</code> of the assistant.</p>
+
+<blockquote>
+    <p><strong>Audit Telemetry on Identity Resolution:</strong> When caller identity is resolved and validated at the execution boundary (such as during <code>SecureRunnable</code> entry), <code>IdentityBridge.record_auth_success()</code> logs an immutable, structured audit event with <code>enforcement_point="IDENTITY_BRIDGE"</code> and <code>reason_code="AUTHENTICATION_SUCCESS"</code>. This captures the authenticated <code>subject_id</code>, <code>tenant_id</code>, <code>roles</code>, numeric <code>clearance_level</code>, and distributed tracing identifiers (<code>trace_id</code>, <code>span_id</code>) to enterprise SIEM sinks before any LLM processing occurs.</p>
+</blockquote>
+
+<h3>2. Injecting Identity into LangChain Invocations</h3>
+
+<p>Once the identity is constructed, your application routes inject it into LangChain's execution graph by wrapping it inside <code>RunnableConfig</code>. In the reference assistant's ticket router (<code>app/routers/tickets.py</code>), <code>IdentityBridge.create_runnable_config(sec_identity)</code> generates the config dictionary and passes it to both triage and remediation agents:</p>
+
+<p><strong>app/routers/tickets.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/routers/tickets.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -48,15 +54,20 @@ def submit_ticket(
+     if ingestion_report:
+         return ingestion_report
+ 
+-    # Triage Phase
+-    incident_context = triage_agent_instance.triage(request)
++    sec_identity = security_identity_from_context(sec_context)
++    run_config = IdentityBridge.create_runnable_config(sec_identity)
++
++    # Triage Phase: Injects caller identity via RunnableConfig
++    incident_context = triage_agent_instance.triage(request, config=run_config)
+...
+-    # Remediation Phase
+-    report = remediation_agent_instance.process_incident(incident_context)
++    # Remediation Phase: Preserves identity across multi-agent handoff
++    report = remediation_agent_instance.process_incident(incident_context, config=run_config)
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> Instead of calling agent workflows without caller context, the route creates <code>run_config</code> containing <code>configurable["security_identity"]</code>. Downstream agent entry points, retrievers, and tools automatically inherit this caller context across asynchronous tasks without thread-local dependencies. See <code>app/routers/tickets.py</code> in <code>secured</code> for the complete controller logic.</p>
+
+<hr />
+
+<h2>Verification Tests (Guardrail Tests)</h2>
+
+<p>Validate identity claim extraction, context propagation, distributed trace binding, and cache eviction upon credential revocation using the project's standardized guardrail suite:</p>
+
+<ul>
+    <li>
+        <strong>Test 20: Identity Context Propagation (<code>20-framework-starter-identity-propagation.sh</code>)</strong><br />
+        Validates that <code>IdentityBridge</code> extracts caller roles, tenant identifiers, and clearance ranks from perimeter claims, constructs the immutable <code>SecurityIdentity</code>, populates <code>RunnableConfig["configurable"]["security_identity"]</code>, and verifies that <code>IdentityBridge.record_auth_success()</code> emits an auditable <code>AUTHENTICATION_SUCCESS</code> telemetry event.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/20-framework-starter-identity-propagation.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 22: PDP Cache Eviction on Identity Invalidation (<code>22-pdp-cache-eviction-on-identity-invalidation.sh</code>)</strong><br />
+        Verifies that when caller credentials, roles, or clearance levels are revoked or modified in the user directory or Identity Provider, <code>OPACacheInvalidationHandler</code> immediately evicts cached authorization verdicts from the two-tier PDP policy decision cache (L1/L2). This guarantees that revoked privileges cannot be exercised using stale cache entries.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/22-pdp-cache-eviction-on-identity-invalidation.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 27: OpenTelemetry Trace &amp; Span Correlation (<code>27-opentelemetry-trace-span-correlation.sh</code>)</strong><br />
+        Verifies that inbound W3C <code>traceparent</code> headers (formatted as <code>version-trace_id-span_id-flags</code>) are parsed at the request boundary, attached to <code>SecurityIdentity.attributes</code> via <code>with_trace_context(trace_id, span_id)</code>, and propagated into downstream audit records emitted by <code>OpenTelemetryLogsPublisher</code> for end-to-end distributed tracing.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/27-opentelemetry-trace-span-correlation.sh</code></pre>
+</div>
+    </li>
+</ul>
+
+<hr />
+
+<h2>Framework Integration &amp; Best Practices</h2>
+
+<ul>
+    <li><strong>Perimeter Cryptographic Validation:</strong> Always verify token signatures and expiration timestamps at your gateway or web framework middleware before invoking <code>IdentityBridge</code>. Never construct an identity from unverified claims.</li>
+    <li><strong>Mandatory Multi-Tenancy:</strong> Enforce the presence of <code>tenant_id</code> on every incoming request to prevent accidental cross-tenant document and tool access.</li>
+    <li><strong>Explicit Propagation:</strong> Always pass <code>config=config</code> to entry points, child runnables, and manual tool calls so caller identity is never dropped mid-execution.</li>
+    <li><strong>Fail-Early Rejection:</strong> If a token lacks a valid subject (<code>sub</code>) or tenant identifier, reject the request with HTTP 401/403 immediately before initializing LLM chains or consuming model tokens.</li>
+    <li><strong>Immediate Cache Invalidation on Revocation:</strong> Coordinate user role revocation events between your identity directory and the LangChain PDP cache to prevent stale permissions from persisting.</li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

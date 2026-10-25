@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 3: Setting Up Your Authorization Engine: Choosing Between Embedded RBAC and External Policy Engines (OPA)</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html" class="active"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 3: Setting Up Your Authorization Engine: Choosing Between Embedded RBAC and External Policy Engines (OPA)</h1>
+
+<p>The Policy Enforcement Point (PEP) intercepts actions inline, while the Policy Decision Point (PDP) serves as the authoritative evaluation brain. Once identity is propagated through <code>RunnableConfig</code>, the PEP queries the PDP using a standardized evaluation tuple: subject, action, resource, and context.</p>
+
+<p>This chapter examines how to configure the two PDP deployment models—an embedded in-process engine and a resilient remote OPA adapter—and highlights how to register the centralized engine and manage its decision cache lifecycle across your enterprise application.</p>
+
+<hr />
+
+<h2>Option 1: In-Process <code>EmbeddedPolicyEngine</code></h2>
+
+<p>For applications requiring ultra-low latency without external network dependencies, the embedded engine runs in-memory with sub-millisecond evaluation. It resolves hierarchical role Directed Acyclic Graphs (DAGs), CEL expressions, and numeric clearance tiers (0 &le; PUBLIC &lt; 1 &le; INTERNAL &lt; 2 &le; CONFIDENTIAL &lt; 3 &le; RESTRICTED).</p>
+
+<p>When hardening your application, you can establish an authorization bootstrap module. In our reference assistant, this is implemented as a new module: <code>app/security/security_integration.py</code>.</p>
+
+<h3>1. Defining the Role Graph and Clearance Hierarchy</h3>
+
+<p>First, configure the role inheritance relationships and clearance tier mappings required by your organization:</p>
+
+<p>New File: <strong>app/security/security_integration.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (NEW FILE)</span>
+      <span class="code-filename">app/security/security_integration.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python"># Hierarchical role inheritance: ADMIN inherits DEVOPS, DEVOPS inherits USER
+def create_role_graph() -> RoleGraph:
+    graph = RoleGraph.create()
+    graph.add_inheritance(ROLE_ADMIN, ROLE_DEVOPS_ENGINEER)
+    graph.add_inheritance(ROLE_ADMIN, ROLE_SUPPORT_AGENT)
+    graph.add_inheritance(ROLE_DEVOPS_ENGINEER, ROLE_USER)
+    graph.add_inheritance(ROLE_SUPPORT_AGENT, ROLE_USER)
+    return graph
+
+CLEARANCE_RANK_MAP: Dict[str, int] = {
+    "TOP_SECRET": 3,
+    "SECRET": 2,
+    "STANDARD": 1,
+    "UNAUTHENTICATED": 0,
+    ROLE_ADMIN: 3,
+    ROLE_DEVOPS_ENGINEER: 2,
+    ROLE_SUPPORT_AGENT: 2,
+    ROLE_USER: 1,
+}
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> The <code>RoleGraph</code> defines a Directed Acyclic Graph (DAG) of role inheritance so higher privileges automatically satisfy lower requirements (e.g. <code>ROLE_ADMIN</code> satisfies <code>ROLE_DEVOPS_ENGINEER</code>). <code>CLEARANCE_RANK_MAP</code> normalizes arbitrary enterprise roles into monotonic integer clearance tiers for numeric range comparisons.</p>
+
+<h3>2. Bootstrapping the Policy Engine</h3>
+
+<p>Next, assemble the <code>EmbeddedPolicyEngine</code> with CEL evaluation, audit logging, and two-tier decision caching:</p>
+
+<p>New File: <strong>app/security/security_integration.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (NEW FILE)</span>
+      <span class="code-filename">app/security/security_integration.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">def get_pdp_engine() -> EmbeddedPolicyEngine:
+    global _PDP_ENGINE_INSTANCE
+    if _PDP_ENGINE_INSTANCE is None:
+        role_graph = create_role_graph()
+        cel_evaluator = CELEvaluator.create(entity_resolver=entity_resolver_instance)
+        audit_manager = AuditManager.create(
+            publishers=[JsonFileAuditLogger.create(DEFAULT_AUDIT_LOG_FILE)],
+            sanitizer=AuditSanitizer.create(masked_fields={"password", "secret", "token"}),
+        )
+        decision_cache = TwoTierDecisionCache.create(
+            l1_enabled=config.cache_l1_enabled,
+            l2_enabled=config.cache_l2_enabled,
+            l2_ttl_seconds=config.cache_l2_ttl_seconds,
+            l2_max_entries=config.cache_l2_max_entries,
+        )
+        engine = EmbeddedPolicyEngine.with_components(
+            role_graph=role_graph,
+            cel_evaluator=cel_evaluator,
+            audit_manager=audit_manager,
+            decision_cache=decision_cache,
+        )
+        engine.enforce_strict_tenant_isolation = True
+        _PDP_ENGINE_INSTANCE = engine
+    return _PDP_ENGINE_INSTANCE
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> <code>EmbeddedPolicyEngine.with_components()</code> combines the role DAG, CEL evaluator, audit manager, and two-tier cache into a cohesive, in-process Policy Decision Point (PDP). See <code>app/security/security_integration.py</code> in the assistant for the complete implementation.</p>
+
+<h3>Two-Tier Decision Cache Architecture</h3>
+<p>To balance sub-millisecond latency with multi-turn agent workloads, <code>TwoTierDecisionCache</code> splits evaluation caching across two complementary layers:</p>
+<ul>
+    <li><strong>Tier 1 (L1) Invocation Cache:</strong> Request-scoped and attached to <code>RunnableConfig</code>; deduplicates identical evaluation tuples within a single agent execution turn or tool loop with zero locking overhead.</li>
+    <li><strong>Tier 2 (L2) Process Cache:</strong> Cross-request in-memory cache bounded by configurable TTL (<code>security.cache.l2.ttl</code>) and LRU size (<code>security.cache.l2.maxEntries</code>), caching static role inheritance and clearance decisions across user sessions.</li>
+</ul>
+
+<hr />
+
+<h2>Global Engine Registration and Discovery</h2>
+
+<p>Rather than manually injecting the PDP instance into every tool and agent boundary across your codebase, your application registers the configured PDP engine and entity resolver globally via <code>SecurityRegistry</code> during initialization. Downstream Policy Enforcement Points (such as <code>@secured_tool</code> decorators and <code>SecureRunnable</code> wrappers) automatically resolve the active evaluation engine and entity resolver from this central registry.</p>
+
+<p>New File: <strong>app/security/security_integration.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (NEW FILE)</span>
+      <span class="code-filename">app/security/security_integration.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">from security_core.registry import SecurityRegistry
+
+# Register configured PDP engine and resolver for global PEP resolution
+SecurityRegistry.configure(
+    pdp_engine=engine,
+    entity_resolver=entity_resolver_instance,
+)
+</code></pre>
+</div>
+
+<hr />
+
+<h2>Option 2: Remote OPA Engine with Fail-Closed Circuit Breaking</h2>
+
+<p>When offloading policy logic to Open Policy Agent (OPA) clusters, network latency and outages introduce critical failure modes. Enterprise applications set up the remote adapter through a factory that wraps HTTP dispatches inside a fail-closed circuit breaker with strict timeouts and recovery probe thresholds.</p>
+
+<p>In <code>app/config.py</code>, the application selects the active PDP mode using the property <code>security.pdp.mode</code> (defaulting to <code>EMBEDDED</code>, with alternative <code>OPA</code>), allowing deployment environments to toggle between in-process evaluation and centralized OPA policy bundles dynamically.</p>
+
+<p>If the remote PDP becomes unreachable or times out, the library can be configured either to enforce strict fail-closed rejection (<code>fallback_engine=None</code>) or to seamlessly use a local PDP fallback (<code>fallback_engine=base_engine</code>) to maintain system availability without sacrificing authorization enforcement:</p>
+
+<p>New File: <strong>app/security/security_integration.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (NEW FILE)</span>
+      <span class="code-filename">app/security/security_integration.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python"># Creating resilient remote OPA adapter with fail-closed circuit breaker
+adapter = RemotePDPAdapter.create(
+    endpoint_url=config.pdp_opa_url,
+    timeout_seconds=config.pdp_opa_timeout_seconds,
+    failure_threshold=config.pdp_circuit_breaker_threshold,
+    recovery_seconds=config.pdp_circuit_breaker_recovery_seconds,
+    fallback_engine=base_engine if use_fallback else None,
+    audit_manager=base_engine.audit_manager,
+)
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> If network calls to OPA fail consecutively beyond <code>failure_threshold</code>, the circuit breaker opens, immediately falling back to <code>fallback_engine</code> or failing closed with a denial, protecting model agents from hanging on network timeouts. </p>
+
+<hr />
+
+<h2>Cache Invalidation and Identity Lifecycle</h2>
+
+<p>Decision cache entries must be evicted when subject permissions change or external policy bundles reload. When user roles, clearances, or account statuses are modified in your user registry or IAM sync job (e.g., upon privilege revocation or role updates), cache invalidation triggers notify <code>OPACacheInvalidationHandler.on_invalidation_event({"subject_id": email})</code> to flush cached decisions and guarantee immediate policy consistency.</p>
+
+<p><strong>app/security/user_registry.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/security/user_registry.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -195,3 +195,6 @@ def evict_subject_from_pdp_cache(self, email: Optional[str]) -> int:
+     if not email:
+         return 0
++    from app.security.security_integration import get_opa_cache_invalidation_handler
++    return get_opa_cache_invalidation_handler().on_invalidation_event({"subject_id": email})
+</code></pre>
+</div>
+
+<p><em>Explanation:</em> Instead of a no-op return, the method notifies the cache invalidation handler to flush both L1 and L2 cache entries for that subject. Future evaluations for that user re-query the PDP immediately, preventing stale privilege retention.</p>
+
+<hr />
+
+<h2>Architectural Comparison</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Dimension</th>
+      <th>EmbeddedPolicyEngine</th>
+      <th>OPAPolicyEngine (Remote SPI)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Deployment Footprint</strong></td>
+      <td>Zero dependencies; runs in-process.</td>
+      <td>Requires OPA sidecar or central cluster.</td>
+    </tr>
+    <tr>
+      <td><strong>Policy Updates</strong></td>
+      <td>Requires service redeploy or config reload.</td>
+      <td>Centralized, dynamic bundle distribution.</td>
+    </tr>
+    <tr>
+      <td><strong>Resilience Mode</strong></td>
+      <td>Process memory bound; zero network risk.</td>
+      <td>Requires fail-closed circuit breakers and bounded timeouts.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>Verification Tests (Guardrail Tests)</h2>
+
+<p>Validate PDP resilience, state transitions, and fail-closed behaviors using the standardized test suite:</p>
+
+<ul>
+    <li>
+        <strong>Test 19: Remote OPA PDP Circuit Breaker Fail-Closed (<code>19-remote-opa-pdp-circuit-breaker-fail-closed.sh</code>)</strong><br />
+        Verifies that during remote network dropouts, socket timeouts, or HTTP 5xx responses, the OPA adapter trips its circuit breaker and immediately returns a fail-closed <code>DENY</code>, halting execution safely.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/19-remote-opa-pdp-circuit-breaker-fail-closed.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 21: PDP Circuit Breaker State Machine Transitions (<code>21-pdp-circuit-breaker-state-machine-transitions.sh</code>)</strong><br />
+        Validates the state machine transitions (<code>CLOSED</code> &rarr; <code>OPEN</code> &rarr; <code>HALF-OPEN</code> &rarr; <code>CLOSED</code>) under successive failure thresholds and recovery probe intervals.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/21-pdp-circuit-breaker-state-machine-transitions.sh</code></pre>
+</div>
+    </li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 11: Enforcing Multi-Tenancy: Isolating Workspaces, Chunks, and Execution Bounds</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html" class="active"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 11: Enforcing Multi-Tenancy: Isolating Workspaces, Chunks, and Execution Bounds</h1>
+
+<p>In enterprise AI architectures, multiple customers, business units, or project teams often share foundational models, inference infrastructure, and vector storage engines. Without strict perimeter enforcement and cryptographic partition checks, shared infrastructure risks critical cross-tenant data exfiltration: an agent acting on behalf of Tenant A might retrieve sensitive knowledge or invoke infrastructure tools belonging to Tenant B. Multi-Tenancy requires treating tenant boundaries as non-negotiable hard perimeters that are evaluated continuously across agent entry gates, ingestion pipelines, vector retrieval queries, and tool execution boundaries.</p>
+
+<p>In this chapter, we use the incident response assistant (<code>langchain-enterprise-incident-assistant</code>) as an enterprise case study to demonstrate how to enforce multi-tenant isolation across your application stack using <code>langchain-security-extension</code>. We examine how to configure tenant perimeters on entry runnables, inject mandatory tenant filters into vector retrievers, and eliminate ad-hoc web filter checks in favor of declarative Policy Enforcement Points (PEPs).</p>
+
+<hr />
+
+<h2>The Strict Multi-Tenancy Invariant</h2>
+
+<p>The <strong>Strict Multi-Tenancy Invariant</strong> dictates that a tenant boundary can never be bypassed or weakened, regardless of administrative role elevation, user clearance levels, or permissive fallback policies:</p>
+
+<ul>
+    <li><strong>Ingestion Partitioning &amp; Permissive Mode Invariant:</strong> Every embedded vector chunk must be stamped with a mandatory <code>sec:tenant_id</code>. Chunks lacking valid tenant metadata are rejected atomically during document indexing. Under permissive ingestion modes (e.g., <em>Everything Public</em> or quarantine elevation), the <code>sec:tenant_id</code> invariant is strictly preserved: while classification may default to public access, chunks strictly retain their origin <code>sec:tenant_id</code> and are never exposed across foreign tenant boundaries.</li>
+    <li><strong>Deterministic Filter Push-Down &amp; Defense-in-Depth:</strong> Retrievers never query vector databases with unconstrained wildcards. Pre-filter Abstract Syntax Trees (AST) always bind an explicit tenant equality check: <code>{SEC_TENANT_ID: identity.tenant_id}</code>. Unauthenticated queries inject a deny-all sentinel (<code>__DENY_ALL_UNAUTHENTICATED__</code>). As a second line of defense, if a vector store profile only supports partial AST filtering (or fails to filter), <code>SecureRetriever</code> executes post-retrieval in-memory pruning against candidate chunks.</li>
+    <li><strong>Entry Perimeter Gate:</strong> Agent entry points configured with <code>SecureRunnable</code> validate that the caller's <code>tenant_id</code> is within the permitted boundary set (e.g., <code>ALLOWED_TENANTS</code>). Breaches trigger an immediate <code>TenantIsolationError</code> and high-severity threat alert (<code>TENANT_BOUND_VIOLATION</code>).</li>
+    <li><strong>Multi-Agent Workflow Preservation:</strong> Multi-tenancy is preserved across multi-agent workflows by propagating the authenticated caller identity in-band inside LangChain's native <code>run_config</code> (via <code>SecureRunnable.handoff</code>), preventing tenant stripping or escalation across execution bounds.</li>
+    <li><strong>Zero Cross-Tenant Contamination:</strong> Foreign-tenant access attempts immediately halt execution, return HTTP 403 with <code>BLOCKED_TENANT</code> telemetry, and emit a <code>TENANT_BOUND_VIOLATION</code> event to the SIEM.</li>
+</ul>
+
+<hr />
+
+<h2>Multi-Tenant Enforcement Across Lifecycle Tiers</h2>
+
+<p>Multi-tenancy is maintained as an ambient invariant across every tier of the agent and knowledge pipeline:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Pipeline Tier</th>
+      <th>Enforcement Mechanism</th>
+      <th>Policy Invariant</th>
+      <th>Violation Handling</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Agent Entry Gate</strong></td>
+      <td><code>SecureRunnable</code> &amp; <code>EmbeddedPolicyEngine</code></td>
+      <td>Caller <code>tenant_id</code> must match <code>target_tenant</code> configured boundary</td>
+      <td>Raises <code>TenantIsolationError</code>; returns <code>BLOCKED_TENANT</code> (HTTP 403)</td>
+    </tr>
+    <tr>
+      <td><strong>Vector Ingestion (ETL)</strong></td>
+      <td><code>DocumentSecurityTransformer</code> &amp; <code>SecurityEnvelopeValidator</code></td>
+      <td>Mandatory <code>sec:tenant_id</code> stamped; invariant preserved across permissive &amp; quarantine modes</td>
+      <td>Atomic chunk rejection or quarantine with tenant lock; batch rolled back</td>
+    </tr>
+    <tr>
+      <td><strong>Vector Retrieval (RAG)</strong></td>
+      <td><code>SecureRetriever</code> AST filter push-down &amp; PDP in-memory pruning</td>
+      <td>Query AST injects <code>{SEC_TENANT_ID: identity.tenant_id}</code>; unauthenticated calls receive deny-all sentinel; secondary in-memory pruning</td>
+      <td>Foreign chunks filtered at query time; in-memory pruning drops mismatched chunks before prompt injection</td>
+    </tr>
+    <tr>
+      <td><strong>Tool Execution (PEP)</strong></td>
+      <td><code>@secured_tool</code> Policy Enforcement Point (PEP) &amp; CEL constraints</td>
+      <td>Dynamic entity attribute evaluation (e.g. <code>ownerDepartment == subject.dept</code>), clearance floors, and parameter constraints</td>
+      <td>Mutative tools: hard abort (<code>STATUS_BLOCKED_BY_POLICY</code>); read-only tools: soft refusal</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Tool PEP Multi-Tenancy &amp; Dynamic ABAC:</strong> While hard tenant perimeters are anchored at agent entry gates and knowledge retrievers, the <code>@secured_tool</code> Policy Enforcement Point (PEP) enforces in-band tenant isolation on tools that consume explicit tenant identifiers (e.g., <code>args.tenant_id == subject.tenantId</code>) or dynamically resolve tenant ownership via asset registries. For a comprehensive guide on defining CEL rules, dynamic entity hydration, and dual-mode PEP enforcement contracts, see <a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html">Chapter 7: Guarding Tools and Enterprise APIs</a>.</p>
+
+<hr />
+
+<h2>Entry Gate Tenant Isolation in SecureRunnable</h2>
+
+<p>At the agent entry boundary, <code>SecureRunnable</code> inspects the caller's authenticated identity against the configured <code>target_tenant</code> boundary set. When <code>engine.enforce_strict_tenant_isolation = True</code> is enabled on the Policy Decision Point (PDP), any cross-tenant mismatch immediately logs a <code>TENANT_BOUND_VIOLATION</code> event with <code>SEVERITY_CRITICAL_ALERT</code> directly within <code>pdp.evaluate()</code>. The factory method <code>AgentAccessDeniedException.for_agent()</code> detects the <code>TENANT_MISMATCH</code> diagnostic reason and raises a typed <code>TenantIsolationError</code>.</p>
+
+<p><strong>security_adapter_langchain/runnable_guard.py</strong></p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_adapter_langchain/runnable_guard.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">class SecureRunnable:
+    """Wraps LangChain runnables with entry authorization and tenant isolation boundaries."""
+
+    def _evaluate_entry_access(self, config: Optional[Dict[str, Any]]) -> SecurityIdentity:
+        identity = IdentityBridge.extract_from_config(config) or IdentityBridge.resolve_identity(None)
+        self._prepare_config(config, identity)
+
+        tenant = self._target_tenant if self._target_tenant is not None else identity.tenant_id
+        request = PolicyEvaluationRequest.create(
+            subject=identity,
+            action=ACTION_AGENT_INVOKE,
+            resource={
+                "target_id": self._agent_name,
+                "tenant_id": tenant,
+                "required_roles": self._required_roles,
+                "min_clearance": self._min_clearance,
+            },
+            context={"config": config} if config else {},
+        )
+
+        decision = self._pdp_engine.evaluate(request)
+        if not decision.is_permitted:
+            # PDP automatically logs TENANT_BOUND_VIOLATION with CRITICAL_ALERT under strict tenant isolation
+            raise AgentAccessDeniedException.for_agent(
+                agent_name=self._agent_name,
+                message=f"Agent invocation denied for '{self._agent_name}': {decision.diagnostic_reason}",
+                diagnostic_reason=decision.diagnostic_reason,
+            )
+        return identity
+</code></pre>
+</div>
+
+<h3>Configuring Agent Tenant Boundaries in Your Application</h3>
+
+<p>In an enterprise deployment, your application must declare authorized tenant boundaries and bind them directly to agent workflows. The reference incident assistant demonstrates this pattern by establishing tenant boundaries during PDP engine initialization and binding <code>target_tenant=ALLOWED_TENANTS</code> across its agent wrappers:</p>
+
+<p><strong>1. Policy Engine Configuration &amp; Tenant Whitelisting</strong></p>
+<p>You can inspect the full implementation in <code>app/security/security_integration.py</code> of the assistant.</p>
+<p>Your application's central security configuration initializes the PDP engine, declares permitted tenant IDs, and enables strict boundary enforcement. As shown in the reference <code>app/security/security_integration.py</code>:</p>
+
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (NEW FILE)</span>
+      <span class="code-filename">app/security/security_integration.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python"># app/security/security_integration.py
+ALLOWED_TENANTS: Set[str] = {
+    DEFAULT_TENANT_ID,
+    ENTERPRISE_TENANT_ID,
+    "CORP_MAIN",
+}
+
+def get_pdp_engine() -> EmbeddedPolicyEngine:
+    ...
+    engine = EmbeddedPolicyEngine.with_components(...)
+    engine.enforce_strict_tenant_isolation = True  # Escalates tenant mismatches to CRITICAL_ALERT
+    return engine
+</code></pre>
+</div>
+
+<p><strong>2. Guarding Upstream Workflow Entry</strong></p>
+<p>You can inspect the full implementation in <code>app/agents/triage_agent.py</code> of the assistant.</p>
+<p>Every user-facing or upstream agent entry point must declare its target tenant boundaries. As illustrated in the triage agent (<code>app/agents/triage_agent.py</code>), wrapping the core workflow with <code>SecureRunnable.wrap()</code> and binding <code>target_tenant=ALLOWED_TENANTS</code> guarantees that incoming requests from unauthorized tenants fail closed before consuming model tokens:</p>
+
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/triage_agent.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">--- a/app/agents/triage_agent.py
++++ b/app/agents/triage_agent.py
+@@ -47,6 +59,13 @@ class TriageAgent:
+             self.model_class,
+             self.api_key
+         )
++        self.secured_workflow = SecureRunnable.wrap(
++            runnable=self._execute_triage,
++            pdp_engine=get_pdp_engine(),
++            agent_name="triage_agent",
++            required_roles=TRIAGE_REQUIRED_ROLES,
++            min_clearance=TRIAGE_MIN_CLEARANCE,
++            target_tenant=ALLOWED_TENANTS,
+         )
+</code></pre>
+</div>
+
+<p><strong>3. Guarding Downstream Workflow Handoffs</strong></p>
+<p>You can inspect the full implementation in <code>app/agents/remediation_agent.py</code> of the assistant.</p>
+<p>Similarly, downstream or specialist execution agents must enforce identical tenant bounds. As shown in <code>app/agents/remediation_agent.py</code>, binding <code>target_tenant=ALLOWED_TENANTS</code> ensures that secondary agents cannot be invoked out-of-bounds, even when called internally during multi-agent handoffs:</p>
+
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/remediation_agent.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">--- a/app/agents/remediation_agent.py
++++ b/app/agents/remediation_agent.py
+@@ -105,6 +89,14 @@ class RemediationAgent:
++        self.secured_workflow = SecureRunnable.wrap(
++            runnable=self._execute_remediation,
++            pdp_engine=get_pdp_engine(),
++            agent_name="remediation_agent",
++            required_roles=TRIAGE_REQUIRED_ROLES,
++            min_clearance=TRIAGE_MIN_CLEARANCE,
++            target_tenant=ALLOWED_TENANTS,
++        ).with_violation_handler(
++            violation_handler=self.violation_handler,
++            fallback_builder=build_violation_fallback_report,
++        )
+</code></pre>
+</div>
+
+<h3>Full Delegation: Cleaning HTTP Filters of Ad-Hoc Tenant Checks</h3>
+
+<p>In conventional web applications, developers frequently rely on custom HTTP middleware or API filters to inspect incoming tenant headers (e.g., <code>if tenant not in allowed: raise HTTPException(403)</code>). While simple web filters work well for standard, single-shot REST requests, they are inadequate for enterprise GenAI architectures. Once a request passes through a web filter into an autonomous agent pipeline, sub-agents, asynchronous tool runners, and vector retrievers lose visibility into the HTTP context unless complex thread-locals or global state are maintained.</p>
+
+<p>By delegating tenant perimeter checks entirely to the security library's <code>SecureRunnable</code> and <code>EmbeddedPolicyEngine</code>, your enterprise codebase eliminates scattered, hardcoded tenant checks from web middleware. Instead, tenant validation is anchored directly into the LangChain execution lifecycle, providing in-band propagation, centralized audit attribution (<code>TENANT_BOUND_VIOLATION</code>), and typed exception flows (<code>TenantIsolationError</code>). In our reference application, this pattern cleans up <code>app/security/auth.py</code> by removing legacy ad-hoc filter checks:</p>
+
+<p>You can inspect the full implementation in <code>app/security/auth.py</code> of the assistant.</p>
+<p><strong>app/security/auth.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/security/auth.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">--- a/app/security/auth.py
++++ b/app/security/auth.py
+@@ -152,9 +137,0 @@ async def get_current_security_context(...)
+-    # Cross-tenant isolation check: reject external/unauthorized tenants
+-    if sec_context.tenantId not in (DEFAULT_TENANT_ID, ENTERPRISE_TENANT_ID):
+-        logger.warning(f"[RequestSecurityFilter] Cross-tenant isolation violation: tenantId={sec_context.tenantId}")
+-        raise HTTPException(
+-            status_code=status.HTTP_403_FORBIDDEN,
+-            detail={"error": "Forbidden", "message": f"Tenant '{sec_context.tenantId}' is unauthorized for target resources"}
+-        )
+</code></pre>
+</div>
+
+<hr />
+
+<h2>Code Hardening: Intercepting Cross-Tenant Breaches in API Routers</h2>
+
+<p>Enterprise API routers that serve agent workflows must intercept security policy exceptions cleanly at the transport boundary. Rather than letting authorization failures bubble up as unhandled 500 errors or leaking stack traces, your API endpoints should catch typed <code>TenantIsolationError</code> exceptions. This allows the API to terminate foreign tenant access immediately, record structured telemetry, and return an HTTP 403 response before model tokens or compute resources are consumed. In the reference implementation, this defense is organized across two distinct operational phases in <code>app/routers/tickets.py</code>:</p>
+
+<h3>Phase 1: Inbound Identity Resolution &amp; Triage Entry PEP</h3>
+
+<p>At your API's front door, the endpoint extracts the caller's authenticated identity and translates it into a native LangChain <code>RunnableConfig</code> via <code>IdentityBridge.create_runnable_config()</code>. Invoking the primary agent within a <code>try/except TenantIsolationError</code> block ensures that any tenant boundary violation is intercepted immediately with zero model token expenditure, as demonstrated in the triage phase of <code>app/routers/tickets.py</code>:</p>
+
+<p>You can inspect the full implementation in <code>app/routers/tickets.py</code> of the assistant.</p>
+<p><strong>app/routers/tickets.py (Triage Phase)</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/routers/tickets.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">--- a/app/routers/tickets.py
++++ b/app/routers/tickets.py
+@@ -51,5 +54,14 @@ def submit_ticket(
+-    # Triage Phase
+-    incident_context = triage_agent_instance.triage(request)
++    sec_identity = security_identity_from_context(sec_context)
++    run_config = IdentityBridge.create_runnable_config(sec_identity)
++
++    # Triage Phase (Guarded by SecureRunnable Entry PEP)
++    try:
++        incident_context = triage_agent_instance.triage(request, config=run_config)
++    except TenantIsolationError as exc:
++        logger.warning(f"Triage entry tenant isolation violation: {exc}")
++        return build_entry_access_denied_report(request, exc, response, "BLOCKED_TENANT")
++    except AgentAccessDeniedException as exc:
++        logger.warning(f"Triage entry access denied: {exc}")
++        return build_entry_access_denied_report(request, exc, response, "BLOCKED")
+</code></pre>
+</div>
+
+<h3>Phase 2: Remediation Handoff &amp; In-Band Tenant Context Preservation</h3>
+
+<p>When an enterprise workflow transitions between multiple agents (such as routing from an intent classifier or triage agent to a domain specialist), passing <code>run_config</code> ensures that <code>SecureRunnable.handoff()</code> immutably carries the caller's verified <code>SecurityIdentity</code> in-band across agent boundaries without relying on fragile global variables or thread-locals. The API router maintains error boundaries around each handoff stage to catch any tenant isolation breaches before mutative tools or expensive operations run. In the reference application's remediation handoff:</p>
+
+<p><strong>app/routers/tickets.py (Remediation Handoff Phase)</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/routers/tickets.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">--- a/app/routers/tickets.py
++++ b/app/routers/tickets.py
+@@ -63,4 +75,12 @@ def submit_ticket(
+-    # Remediation Phase
+-    report = remediation_agent_instance.process_incident(incident_context)
++    # Remediation Phase (In-band SecureRunnable.handoff preserving context)
++    try:
++        report = remediation_agent_instance.process_incident(incident_context, config=run_config)
++    except TenantIsolationError as exc:
++        logger.warning(f"Remediation handoff tenant isolation violation: {exc}")
++        return build_entry_access_denied_report(incident_context, exc, response, "BLOCKED_TENANT", stage="remediation")
++    except AgentAccessDeniedException as exc:
++        logger.warning(f"Remediation handoff entry access denied: {exc}")
++        return build_entry_access_denied_report(incident_context, exc, response, "BLOCKED", stage="remediation")
+</code></pre>
+</div>
+
+<hr />
+
+<h2>Retrieval AST Tenant Partition Push-Down</h2>
+
+<p>In enterprise RAG architectures, multi-tenancy cannot rely on system prompts instructing the model to <em>"only read runbooks for your organization"</em>—a pattern vulnerable to prompt injection and retrieval leakage. Retrieval must enforce tenant isolation at query compilation time using <strong>Deterministic Filter Push-Down</strong>: <code>SecureRetriever</code> automatically injects <code>{SEC_TENANT_ID: identity.tenant_id}</code> into the vector store AST filter, ensuring foreign-tenant chunks are excluded at the database index layer before similarity vectors are compared.</p>
+
+<p><strong>security_adapter_langchain/retriever_wrapper.py</strong></p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_adapter_langchain/retriever_wrapper.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">class SecureRetriever:
+    """Wraps vector store retrievers with AST pre-filtering and post-retrieval clearance pruning."""
+
+    def build_full_ast(self, identity: Optional[SecurityIdentity]) -> PrefilterAST:
+        """Constructs unconstrained full AST from SecurityIdentity pushing down tenant boundary."""
+        if identity is None or identity.is_anonymous or identity.subject_id is None:
+            return PrefilterAST({SEC_TENANT_ID: "__DENY_ALL_UNAUTHENTICATED__"})
+
+        and_clauses: List[Dict[str, Any]] = [
+            {SEC_TENANT_ID: identity.tenant_id},
+            {SEC_CLEARANCE_FLOOR: {"$lte": identity.clearance_level}},
+        ]
+        if identity.roles:
+            and_clauses.append({SEC_ALLOWED_ROLES: {"$in": list(identity.roles)}})
+        return PrefilterAST({"$and": and_clauses})
+</code></pre>
+</div>
+
+<p>To harden your enterprise knowledge base, wrap your standard vector retriever with <code>SecureRetriever.wrap()</code>. The reference implementation demonstrates this in <code>app/agents/knowledge_base_store.py</code>, upgrading a basic ChromaDB retriever into a secure, tenant-isolated retrieval pipeline:</p>
+
+<p>You can inspect the full implementation in <code>app/agents/knowledge_base_store.py</code> of the assistant.</p>
+<p><strong>app/agents/knowledge_base_store.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/knowledge_base_store.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">--- a/app/agents/knowledge_base_store.py
++++ b/app/agents/knowledge_base_store.py
+@@ -193,3 +246,10 @@
+-        self._retriever = self._vector_store.as_retriever(search_kwargs={"k": TOP_K_DEFAULT})
++        pdp_engine = get_pdp_engine()
++        base_retriever = self._vector_store.as_retriever(search_kwargs={"k": TOP_K_DEFAULT})
++        self._retriever = SecureRetriever.wrap(
++            base_retriever,
++            pdp_engine=pdp_engine,
++            oversampling_factor=DEFAULT_OVERSAMPLING_FACTOR,
++            secret_key=config.security_hmac_secret,
++            store_profile=STORE_PROFILE_FULL_AST,
++            secondary_fetch_fn=self._secondary_fetch_chroma_page,
++        )
+</code></pre>
+</div>
+
+<p><strong>Second Line of Defense (Post-Retrieval In-Memory Pruning):</strong> If a vector store profile only supports partial AST filtering (or fails to filter correctly), <code>SecureRetriever</code> evaluates each candidate chunk's <code>doc_tenant</code> against caller identity via PDP <code>evaluate()</code>, ensuring foreign-tenant chunks are pruned in memory before reaching prompt context.</p>
+
+<hr />
+
+<h2>Verification Tests (Guardrail Tests)</h2>
+
+<p>Automated regression testing is essential for verifying that multi-tenant boundaries cannot be bypassed by role elevation, parameter manipulation, or permissive configuration changes. When building CI/CD test pipelines for your enterprise agent systems, structure verification tests to assert boundary enforcement across each architectural tier. The reference project provides standardized guardrail test scripts illustrating these assertions:</p>
+
+<ul>
+    <li>
+        <strong>Test 26: Tenant Boundary Violation Threat Alert (<code>26-tenant-isolation-boundary-violation-alert.sh</code>)</strong><br />
+        Validates strict tenant boundary isolation by asserting that callers claiming foreign tenant partition keys (e.g. <code>CORP_FOREIGN</code>) are blocked with HTTP 403 and <code>remediation_security=BLOCKED_TENANT</code>, emitting a <code>TENANT_BOUND_VIOLATION</code> critical alert to <code>logs/security-audit.json</code>.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/26-tenant-isolation-boundary-violation-alert.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 17: RAG VectorStore AST Prefilter Translation (<code>17-rag-vectorstore-ast-prefilter-translation.sh</code>)</strong><br />
+        Verifies that vector database pre-filter AST compilation automatically injects immutable <code>sec:tenant_id</code> equality constraints, ensuring multi-tenant partition boundaries cannot leak across knowledge retrieval queries.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/17-rag-vectorstore-ast-prefilter-translation.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Tests 01, 04 &amp; 07: Ingestion Envelope &amp; Tenant Partition Invariant (<code>01-ingestion-envelope-validation-enforced.sh</code>, <code>04-ingestion-permissive-quarantine-elevation.sh</code>, <code>07-ingestion-unlabelled-chunk-quarantine-policy.sh</code>)</strong><br />
+        Verifies that vector chunks must carry mandatory <code>sec:tenant_id</code> tags during ETL indexing, and that unlabelled or quarantined documents preserve strict tenant partitioning even under permissive classification elevation modes.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/01-ingestion-envelope-validation-enforced.sh
+./internal-security-guardrail-tests/04-ingestion-permissive-quarantine-elevation.sh
+./internal-security-guardrail-tests/07-ingestion-unlabelled-chunk-quarantine-policy.sh</code></pre>
+</div>
+    </li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

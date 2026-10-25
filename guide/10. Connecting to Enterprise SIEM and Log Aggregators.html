@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 10: Connecting to Enterprise SIEM and Log Aggregators: Writing to Splunk, Elastic, or OpenTelemetry</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html" class="active"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 10: Connecting to Enterprise SIEM and Log Aggregators: Writing to Splunk, Elastic, or OpenTelemetry</h1>
+
+<p>Every access evaluation, tool dispatch, and anomalous threshold breach across an agent's lifecycle produces security telemetry. To meet compliance obligations and detect active attacks, this telemetry must stream into an enterprise SIEM (Security Information and Event Management: a centralized platform that aggregates, correlates, and analyzes security telemetry across enterprise systems). However, synchronous logging directly inside model execution paths introduces network latency and risks crashing running agents if log servers become unreachable. Connecting to enterprise log aggregators requires a decoupled, non-blocking asynchronous pipeline that formats events according to common industry schemas, binds distributed trace contexts, and handles backpressure safely.</p>
+
+<p>In this chapter, we use the incident response assistant (<code>langchain-enterprise-incident-assistant</code>) as a concrete demonstrator to show how to connect your enterprise LLM applications to SIEM platforms (such as Splunk, Elastic, or OpenTelemetry collectors) using <code>langchain-security-extension</code>. We examine how to configure <code>AuditManager</code> as a unified telemetry bus, extract and propagate W3C distributed trace headers, and ensure non-blocking, tamper-evident audit event dispatch.</p>
+
+<p>A central architectural advantage of the <code>security_core</code> design is providing a <strong>single, unified entry point</strong> (<code>AuditManager</code> backed by the <code>AuditPublisherSPI</code> interface) for connecting external aggregators. Rather than requiring individual Policy Enforcement Points (PEPs)—such as <code>@secured_tool</code>, <code>SecureRunnable</code>, <code>SecureRetriever</code>, or ingestion validators—to maintain independent logging logic and network connectors, all PEPs dispatch standardized security events to <code>AuditManager</code>. As a result, attaching, swapping, or multiplexing external log aggregators requires configuring publishers in a single location, keeping agent code clean and completely decoupled from observability infrastructure.</p>
+
+<p>While the security library (<code>langchain-security-extension</code>) provides ready-to-use SPI publishers for enterprise platforms (including <code>SplunkHecPublisher</code>, <code>ElasticCommonSchemaPublisher</code>, and <code>OpenTelemetryLogsPublisher</code>), the demonstrator application (<code>langchain-enterprise-incident-assistant</code>) configures local JSON log forwarding (<code>JsonFileAuditLogger</code>) as its primary operational sink (the standard pattern for containerized nodes where agents like Fluentbit or Vector tail log volumes), with externalized settings to optionally enable <code>SplunkHecPublisher</code> directly when HEC credentials are supplied.</p>
+
+<hr />
+
+<h2>The Standardized Security Event Envelope</h2>
+
+<p>To eliminate proprietary log formats, security events adhere to an envelope compatible with both OCSF (Open Cybersecurity Schema Framework: an open-source, vendor-agnostic specification providing a unified taxonomy for security events) and ECS (Elastic Common Schema: an extensible specification defining a common set of fields for storing and analyzing event data in Elasticsearch):</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Envelope Section</th>
+      <th>Key Fields</th>
+      <th>Operational Role</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Header &amp; Tracing</strong></td>
+      <td><code>event_id</code> (UUID), <code>schema_version</code>, <code>timestamp_utc</code>, <code>trace_id</code>, <code>span_id</code></td>
+      <td>Enables distributed log correlation with W3C request traces.</td>
+    </tr>
+    <tr>
+      <td><strong>Subject Principal</strong></td>
+      <td><code>subject_id</code>, <code>tenant_id</code>, <code>subject_roles</code>, <code>clearance</code></td>
+      <td>Captures the immutable caller identity extracted from <code>RunnableConfig</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Action &amp; Target</strong></td>
+      <td><code>enforcement_point</code>, <code>action</code>, <code>target_resource</code></td>
+      <td>Identifies the originating PEP and requested operation.</td>
+    </tr>
+    <tr>
+      <td><strong>Decision &amp; Verdict</strong></td>
+      <td><code>decision</code> (<code>ALLOW</code>, <code>DENY</code>, <code>HARD_ABORT</code>), <code>reason_code</code></td>
+      <td>Records the authorization outcome and rule justification.</td>
+    </tr>
+    <tr>
+      <td><strong>Sanitized Context</strong></td>
+      <td><code>payload_snapshot</code>, <code>diagnostic_reason</code></td>
+      <td>Contains arguments and metadata scrubbed of credentials, API tokens, and PII.</td>
+    </tr>
+    <tr>
+      <td><strong>Tamper-Evidence</strong></td>
+      <td><code>sequence_number</code>, <code>envelope_hmac</code></td>
+      <td>Monotonic sequence counter and optional SHA-256 HMAC digest reserved for downstream append-only cryptographic forwarders (document chunks independently verify metadata integrity via <code>sec:envelope_hash</code>).</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>Asynchronous Publisher SPI and Ring Buffer Architecture</h2>
+
+<p>Decoupling log export from agent inference relies on the <code>AuditPublisherSPI</code> interface and the central <code>AuditManager</code>. Rather than blocking the model execution thread or relying on fragile asynchronous event-loop primitives, <code>AuditManager</code> dispatches events to a thread-safe bounded deque (ring buffer) monitored by a dedicated background daemon worker thread (<code>AuditManagerAsyncWorker</code>). If the downstream SIEM becomes slow or temporarily unreachable, <code>AuditManager</code> sheds load using <code>DROP_OLDEST_WITH_METRIC</code>, incrementing <code>dropped_count</code> while preserving system responsiveness.</p>
+
+<p><strong>security_core/audit.py</strong></p>
+<p><strong>Part 1: The Service Provider Interface (AuditPublisherSPI)</strong></p>
+<p>The <code>AuditPublisherSPI</code> defines the contract for streaming structured security events to downstream SIEM and aggregation platforms. Implementors can build custom publishers for internal logging backends or use the library's built-in connectors:</p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_core/audit.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python"># security_core/audit.py (Pluggable SIEM Publisher SPI)
+from abc import ABC, abstractmethod
+
+class AuditPublisherSPI(ABC):
+    """SPI interface for enterprise SIEM and log aggregators (Splunk, Elastic, OpenTelemetry)."""
+
+    @abstractmethod
+    def publish(self, event: "AuditEvent") -> None:
+        """Publish a structured audit event to downstream log aggregators."""
+        pass
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass</code></pre>
+</div>
+
+<p><strong>Part 2: The Non-Blocking Ring Buffer (AuditManager)</strong></p>
+<p>To insulate agent execution from network delays, <code>AuditManager</code> dispatches events to a thread-safe ring buffer serviced by a daemon worker thread, applying load shedding (<code>DROP_OLDEST_WITH_METRIC</code>) when under extreme load:</p>
+<div class="code-block-container code-block-library">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+      <span class="code-filename">security_core/audit.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python"># security_core/audit.py (Ring Buffer Asynchronous Dispatch)
+from collections import deque
+import threading
+
+class AuditManager:
+    """Non-blocking ring buffer dispatch decoupling log export from agent inference."""
+
+    def __init__(self, publishers: List[AuditPublisherSPI], capacity: int = 1000):
+        self._publishers = list(publishers)
+        self._capacity = capacity
+        self._buffer: deque = deque()
+        self._dropped_count = 0
+        self._lock = threading.Lock()
+        self._queue_condition = threading.Condition(self._lock)
+        self._worker_thread = threading.Thread(
+            target=self._worker_loop,
+            name="AuditManagerAsyncWorker",
+            daemon=True,
+        )
+        self._worker_thread.start()
+
+    def record_event(self, event: "AuditEvent") -> None:
+        """Applies in-flight PII sanitization and queues event into ring buffer without blocking."""
+        with self._queue_condition:
+            if len(self._buffer) >= self._capacity:
+                self._buffer.popleft()  # DROP_OLDEST_WITH_METRIC load shedding
+                self._dropped_count += 1
+            self._buffer.append(event)
+            self._queue_condition.notify()</code></pre>
+</div>
+
+<hr />
+
+<h2>Threat Taxonomy and Severity Matrix</h2>
+
+<p>The audit subsystem maps routine operations and malicious security breaches into standardized event types and severity levels:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Event Type</th>
+      <th>Trigger Condition</th>
+      <th>Default Severity</th>
+      <th>Mitigation Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>AGENT_ACCESS_PERMITTED</code></td>
+      <td>Caller cleared to invoke an agent or graph</td>
+      <td><code>INFORMATIONAL</code></td>
+      <td>Execution proceeds</td>
+    </tr>
+    <tr>
+      <td><code>TOOL_FEEDBACK_VIOLATION</code></td>
+      <td>Read-only tool denied; synthetic refusal returned</td>
+      <td><code>NOTICE</code></td>
+      <td>Feedback message returned</td>
+    </tr>
+    <tr>
+      <td><code>TOOL_HARD_ABORT_TRIGGERED</code></td>
+      <td>Mutative tool denied; immediate exception raised</td>
+      <td><code>SECURITY_ALERT</code></td>
+      <td>Execution halted</td>
+    </tr>
+    <tr>
+      <td><code>POLICY_BRUTE_FORCE_DETECTED</code></td>
+      <td>Consecutive tool denials breach invocation retry budget</td>
+      <td><code>CRITICAL_ALERT</code></td>
+      <td>Turn aborted; SIEM alert generated</td>
+    </tr>
+    <tr>
+      <td><code>POLICY_BRUTE_FORCE_SCANNING</code></td>
+      <td>Sliding-window abuse throttle exceeded across turns</td>
+      <td><code>CRITICAL_ALERT</code></td>
+      <td>Execution halted; SIEM alert generated</td>
+    </tr>
+    <tr>
+      <td><code>TENANT_BOUND_VIOLATION</code></td>
+      <td>Caller attempts cross-tenant resource access</td>
+      <td><code>CRITICAL_ALERT</code></td>
+      <td>Request dropped; perimeter alerted</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>Configuring Enterprise Audit Publishers</h2>
+
+<p>In <code>app/security/security_integration.py</code> (the central security bootstrap module), the application leverages <code>AuditManager</code> as the single entry point for all security telemetry. The security library provides ready-to-use SPI publishers for major platforms (<code>SplunkHecPublisher</code>, <code>ElasticCommonSchemaPublisher</code>, and <code>OpenTelemetryLogsPublisher</code>). In the demonstrator application, <code>AuditManager</code> is configured with <code>JsonFileAuditLogger</code> as the primary sink for local log forwarding, and conditionally registers <code>SplunkHecPublisher</code> if external HEC credentials are provided in the environment. It also exposes <code>get_audit_events()</code> for flushing and parsing audit logs during automated verification.</p>
+
+<p>New File: <strong>app/security/security_integration.py</strong></p>
+
+<p>In your enterprise application, wire your desired SIEM publishers into the <code>AuditManager</code> during policy engine initialization. You can inspect the full implementation in <code>app/security/security_integration.py</code> of the assistant.</p>
+
+<p><strong>Step 1: Configuring AuditManager with Enterprise SIEM Publishers</strong></p>
+<p>The demonstrator application configures <code>JsonFileAuditLogger</code> for local volume tailing and conditionally registers <code>SplunkHecPublisher</code> if HEC endpoint credentials are set:</p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (NEW FILE)</span>
+      <span class="code-filename">app/security/security_integration.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">        # Configure AuditManager with JsonFileAuditLogger for persistence and audit verification.
+        # Additional enterprise SIEM publishers (e.g. SplunkHecPublisher) are attached conditionally.
+        audit_publishers = [
+            JsonFileAuditLogger.create(DEFAULT_AUDIT_LOG_FILE),
+        ]
+        splunk_url = config.splunk_hec_url
+        splunk_token = config.splunk_token
+        if splunk_url and splunk_token:
+            audit_publishers.append(SplunkHecPublisher(hec_url=splunk_url, token=splunk_token))
+
+        audit_manager = AuditManager.create(
+            publishers=audit_publishers,
+            sanitizer=sanitizer,
+        )
+        # Register audit manager with policy engine
+        _PDP_ENGINE_INSTANCE = EmbeddedPolicyEngine.with_components(
+            role_graph=role_graph,
+            cel_evaluator=cel_evaluator,
+            audit_manager=audit_manager,
+            decision_cache=decision_cache,
+        )</code></pre>
+</div>
+
+<p><strong>Step 2: Automated Verification Helper (Flushing & Parsing Audit Events)</strong></p>
+<p>To verify that security events are recorded accurately during test execution, <code>get_audit_events</code> flushes pending ring-buffer events and returns parsed records:</p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (NEW FILE)</span>
+      <span class="code-filename">app/security/security_integration.py</span>
+    </div>
+    <span class="code-lang">PYTHON</span>
+  </div>
+  <pre><code class="language-python">def get_audit_events(file_path: str) -> List[JsonAuditEventRecord]:
+    """Flushes active AuditManager and returns parsed audit events from the target JSON log file."""
+    pdp = get_pdp_engine()
+    audit_mgr = getattr(pdp, "audit_manager", None)
+    if audit_mgr:
+        audit_mgr.flush()
+    if not os.path.exists(file_path):
+        return []
+    records: List[JsonAuditEventRecord] = []
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped:
+                try:
+                    records.append(JsonAuditEventRecord(json.loads(stripped)))
+                except json.JSONDecodeError:
+                    pass
+    return records</code></pre>
+</div>
+
+<hr />
+
+<h2>Code Hardening: Hooking Audit Telemetry and SIEM into Application Flow</h2>
+
+<p>Configuring the <code>AuditManager</code> in <code>security_integration.py</code> establishes the non-blocking publisher pipeline, but integrating telemetry into the end-to-end request lifecycle requires connecting five key components across the application:</p>
+
+<ol>
+  <li><strong>Configuring SIEM Endpoints:</strong> Exposing Splunk HEC credentials in <code>app/config.py</code>.</li>
+  <li><strong>Distributed Trace Capture:</strong> Extracting W3C <code>traceparent</code> headers in <code>app/security/auth.py</code>.</li>
+  <li><strong>Binding Trace Context into Security Identity:</strong> Transferring trace and span IDs to <code>SecurityIdentity.attributes</code> in <code>app/security/models.py</code>.</li>
+  <li><strong>Trace &amp; Identity Context Propagation:</strong> Injecting <code>RunnableConfig</code> at the API entry point in <code>app/routers/tickets.py</code>.</li>
+  <li><strong>Perimeter Ingestion Telemetry:</strong> Emitting structured <code>ticket:submit</code> audit records in <code>app/agents/guardrail_tests_telemetry_helper.py</code>.</li>
+</ol>
+
+<h3>1. Externalizing SIEM and Log Aggregator Settings</h3>
+
+<p>Enterprise SIEM publishers require externalized configuration for endpoints and authentication tokens. The configuration reader in <code>app/config.py</code> is updated to inspect environment variables (such as <code>SPLUNK_HEC_URL</code> and <code>SPLUNK_TOKEN</code>) and fall back to <code>config.properties</code>, ensuring publishers register dynamically without hardcoded credentials:</p>
+
+<p>You can inspect the full implementation in <code>app/config.py</code> of the assistant.</p>
+<p><strong>app/config.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/config.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">--- a/app/config.py
++++ b/app/config.py
+@@ -20,6 +20,9 @@ DEFAULT_ABUSE_WINDOW_SECONDS = 60.0
+ DEFAULT_ABUSE_MAX_DENIALS = 3
++DEFAULT_SPLUNK_HEC_URL = ""
++DEFAULT_SPLUNK_TOKEN = ""
+ 
+@@ -170,4 +173,18 @@ class AppConfig:
++    @property
++    def splunk_hec_url(self) -> str:
++        url = os.environ.get("SPLUNK_HEC_URL")
++        if url:
++            return url
++        return self.get_property("security.audit.splunk.hec.url", DEFAULT_SPLUNK_HEC_URL)
++
++    @property
++    def splunk_token(self) -> str:
++        token = os.environ.get("SPLUNK_TOKEN")
++        if token:
++            return token
++        return self.get_property("security.audit.splunk.token", DEFAULT_SPLUNK_TOKEN)
+</code></pre>
+</div>
+
+<h3>2. Capturing W3C Distributed Trace and Span Headers</h3>
+
+<p>To satisfy distributed tracing and correlation requirements (Guardrail Test 27), the authentication filter in <code>app/security/auth.py</code> parses incoming W3C <code>traceparent</code> headers (format: <code>00-&lt;trace_id&gt;-&lt;span_id&gt;-&lt;flags&gt;</code>) and attaches the extracted IDs directly to <code>SecurityContext</code>:</p>
+
+<p>You can inspect the full implementation in <code>app/security/auth.py</code> of the assistant.</p>
+<p><strong>app/security/auth.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/security/auth.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">--- a/app/security/auth.py
++++ b/app/security/auth.py
+@@ -140,6 +121,10 @@ async def get_current_security_context(
+             parts = traceparent.split("-")
+             trace_id = parts[1]
+             span_id = parts[2]
+ 
+     sec_context = extract_security_context_from_request(request, credentials)
++    if sec_context:
++        sec_context.traceId = trace_id
++        sec_context.spanId = span_id
++
+     if not sec_context or sec_context.clearanceLevel == CLEARANCE_UNAUTHENTICATED or ROLE_GUEST in sec_context.assignedRoles:
+ </code></pre>
+</div>
+
+<h3>3. Binding Trace Context into Security Identity</h3>
+
+<p>Extracting headers in <code>auth.py</code> attaches <code>traceId</code> and <code>spanId</code> to the web layer's <code>SecurityContext</code>. To ensure the library's <code>SecurityIdentity</code> inherits these values, <code>app/security/models.py</code> defines these attributes on <code>SecurityContext</code> and updates <code>to_identity()</code> to populate <code>attributes["trace_id"]</code> and <code>attributes["span_id"]</code> (or invoke <code>with_trace_context()</code>). This provides the essential bridge transferring HTTP trace details into the immutable library identity envelope:</p>
+
+<p>You can inspect the full implementation in <code>app/security/models.py</code> of the assistant.</p>
+
+<p><strong>Step 1: Adding Trace Fields to Web SecurityContext</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/security/models.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -11,6 +11,9 @@ class SecurityContext(BaseModel):
+     clearanceLevel: str = CLEARANCE_UNAUTHENTICATED
+     tenantId: str = DEFAULT_TENANT_ID
++    traceId: Optional[str] = None
++    spanId: Optional[str] = None
++    securityIdentity: Optional[SecurityIdentity] = Field(default=None, exclude=True)</code></pre>
+</div>
+
+<p><strong>Step 2: Bridging Trace Context into Library SecurityIdentity</strong></p>
+<p>The <code>to_identity</code> method transfers <code>traceId</code> and <code>spanId</code> into <code>SecurityIdentity.attributes</code> (or calls <code>with_trace_context</code>):</p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/security/models.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">@@ -42,6 +45,29 @@ class SecurityContext(BaseModel):
++    def to_identity(self, clearance_rank_map: Dict[str, int], default_clearance: int) -> SecurityIdentity:
++        """Return the bound SecurityIdentity directly, avoiding redundant claims parsing."""
++        if self.securityIdentity is not None:
++            if (self.traceId and self.securityIdentity.attributes.get("trace_id") != self.traceId) or (
++                self.spanId and self.securityIdentity.attributes.get("span_id") != self.spanId
++            ):
++                self.securityIdentity = self.securityIdentity.with_trace_context(self.traceId, self.spanId)
++            return self.securityIdentity
++
++        attrs: Dict[str, Any] = {}
++        if self.traceId:
++            attrs["trace_id"] = self.traceId
++        if self.spanId:
++            attrs["span_id"] = self.spanId
++
++        self.securityIdentity = SecurityIdentity.create(
++            subject_id=self.userEmail,
++            tenant_id=self.tenantId,
++            roles=set(self.assignedRoles),
++            clearance_level=clr_rank,
++            department_id=self.department,
++            attributes=attrs,
++        )
++        return self.securityIdentity</code></pre>
+</div>
+
+<h3>4. Propagating Correlated Identity into Agent Entry Runnables</h3>
+
+<p>In <code>app/routers/tickets.py</code>, the application bridges the request's security context into LangChain's execution graph using <code>security_identity_from_context()</code> and <code>IdentityBridge.create_runnable_config()</code>. When <code>SecureRunnable</code> wraps the agent entry point (such as <code>triage_agent.triage</code>), it automatically extracts <code>trace_id</code> and <code>span_id</code> directly from <code>identity.attributes</code>. Because this identity is preserved within LangChain's <code>RunnableConfig</code> under <code>configurable["security_identity"]</code>, downstream graph nodes, chained runnables, and tools automatically inherit the trace and caller context without requiring developers to pass these details again as function parameters.</p>
+
+<p>Upon successful entry verification, <code>SecureRunnable</code> automatically emits an authenticated entry audit event (<code>IdentityBridge.record_auth_success</code>) capturing the caller's identity, roles, clearance rank, <code>trace_id</code>, and <code>span_id</code> directly to <code>AuditManager</code>. Any subsequent tool executions, policy violations, or authorization denials across the lifecycle likewise emit standardized, trace-correlated <code>AuditEvent</code> records to the ring buffer automatically:</p>
+
+<p>You can inspect the full implementation in <code>app/routers/tickets.py</code> of the assistant.</p>
+<p><strong>app/routers/tickets.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/routers/tickets.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">--- a/app/routers/tickets.py
++++ b/app/routers/tickets.py
+@@ -16,6 +16,8 @@ from app.agents.guardrail_tests_telemetry_helper import (
+     enforce_ingestion_security,
+     build_entry_access_denied_report,
+ )
++from app.security.security_integration import security_identity_from_context
++from security_core.identity import IdentityBridge
+ 
+@@ -48,15 +50,21 @@ def submit_ticket(
+     if ingestion_report:
+         return ingestion_report
+ 
++    sec_identity = security_identity_from_context(sec_context)
++    run_config = IdentityBridge.create_runnable_config(sec_identity)
++
+-    # Triage Phase
+-    incident_context = triage_agent_instance.triage(request)
++    # Triage Phase (Guarded by SecureRunnable Entry PEP with trace context)
++    try:
++        incident_context = triage_agent_instance.triage(request, config=run_config)
+...
+-    # Remediation Phase
+-    report = remediation_agent_instance.process_incident(incident_context)
++    # Remediation Phase (Propagating identity and trace context to downstream tools)
++    try:
++        report = remediation_agent_instance.process_incident(incident_context, config=run_config)
+</code></pre>
+</div>
+
+<h3>5. Emitting Ingestion Audit Events at Security Perimeter</h3>
+
+<p>Audit telemetry begins before an agent even processes input. In <code>app/agents/guardrail_tests_telemetry_helper.py</code>, the <code>enforce_ingestion_security</code> function accesses the central policy engine via <code>get_pdp_engine()</code> and immediately dispatches a structured <code>ticket:submit</code> event to <code>AuditManager</code>. If subsequent admission checks reject the payload (e.g., prompt injection or unlabelled chunks), the initial audit event guarantees forensic traceability of the inbound attempt:</p>
+
+<p>You can inspect the full implementation in <code>app/agents/guardrail_tests_telemetry_helper.py</code> of the assistant.</p>
+<p><strong>app/agents/guardrail_tests_telemetry_helper.py</strong></p>
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">DEMO APP (DIFF)</span>
+      <span class="code-filename">app/agents/guardrail_tests_telemetry_helper.py</span>
+    </div>
+    <span class="code-lang">DIFF</span>
+  </div>
+  <pre><code class="language-diff">--- a/app/agents/guardrail_tests_telemetry_helper.py
++++ b/app/agents/guardrail_tests_telemetry_helper.py
+@@ -4,6 +4,8 @@ import logging
+ from typing import List, Tuple, Any, Optional, Dict
+ from app.security.models import RemediationReport
++from app.security.security_integration import get_pdp_engine
++from security_core.audit import AuditEvent
+ 
+@@ -73,6 +75,27 @@ def enforce_ingestion_security(
+     request: Any,
+     sec_context: Any,
+     response: Any,
+ ) -> Optional[RemediationReport]:
+-    """Baseline ingestion security handler for unhardened master branch (no-op)."""
++    pdp_engine = get_pdp_engine()
++    tenant_id = sec_context.tenantId if sec_context else "CORP_MAIN"
++    audit_mgr = getattr(pdp_engine, "audit_manager", None) if pdp_engine else None
++    if audit_mgr:
++        audit_mgr.record_event(
++            AuditEvent.create(
++                subject_id=request.userEmail,
++                tenant_id=tenant_id,
++                action="ticket:submit",
++                resource=f"ticket:{request.ticketId}",
++                decision="PERMIT",
++                diagnostic_reason="Ticket submitted for processing",
++                severity="INFORMATIONAL",
++                metadata={
++                    "ticketId": request.ticketId,
++                    "userEmail": request.userEmail,
++                    "rawTicketText": getattr(request, "rawTicketText", ""),
++                    "submittedAt": getattr(request, "submittedAt", None),
++                },
++                enforcement_point="AGENT_GUARD",
++                reason_code="TICKET_SUBMITTED",
++            )
++        )
+</code></pre>
+</div>
+
+
+<hr />
+
+<h2>Verification Tests (Guardrail Tests)</h2>
+
+<p>Validate structured audit schemas, trace correlation, and automated SIEM threat alerts using the project's standardized guardrail suite:</p>
+
+<ul>
+    <li>
+        <strong>Test 24: SIEM Audit Sanitization Enforced (<code>24-siem-audit-sanitization-enforced.sh</code>)</strong><br />
+        Validates non-blocking emission of sanitized OCSF/ECS audit records to logging pipelines, confirming that no PII, secrets, or raw token streams leak into downstream aggregators.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/24-siem-audit-sanitization-enforced.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 27: W3C Distributed Trace &amp; Span Correlation (<code>27-opentelemetry-trace-span-correlation.sh</code>)</strong><br />
+        Confirms that audit records bind directly to active distributed tracing spans (<code>trace_id</code> and <code>span_id</code>) extracted from inbound W3C <code>traceparent</code> headers and propagated through <code>SecurityIdentity</code>. While the library supports an <code>OpenTelemetryLogsPublisher</code> plugin, this test verifies that the active distributed trace context is accurately stamped into the audit records written by <code>AuditManager</code> (enabling seamless correlation across enterprise SIEMs and OpenTelemetry distributed tracing spans).
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/27-opentelemetry-trace-span-correlation.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 28: SIEM Policy Brute-Force Alert Generation (<code>28-siem-policy-brute-force-alert-generation.sh</code>)</strong><br />
+        Tests automated generation of high-severity (<code>CRITICAL_ALERT</code>) threat events and immediate loop aborts when repeated tool execution denials breach invocation retry budgets.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/28-siem-policy-brute-force-alert-generation.sh</code></pre>
+</div>
+    </li>
+    <li>
+        <strong>Test 30: Telemetry Sanitization Raw Event Inspection (<code>30-telemetry-sanitization-raw-event-verified.sh</code>)</strong><br />
+        Inspects raw dictionary events emitted by <code>AuditManager</code> (<code>event.to_dict()</code>) to guarantee that passwords, API keys, tokens, and SSNs are replaced with <code>[REDACTED]</code> masks before being written to disk or transmitted over the wire.
+        <div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/30-telemetry-sanitization-raw-event-verified.sh</code></pre>
+</div>
+    </li>
+</ul>
+  </main>
+</div>
+</body>
+</html>

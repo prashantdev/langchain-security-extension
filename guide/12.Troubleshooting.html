@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 12: Troubleshooting: Production Diagnostics, Common Pitfalls, and Failure Modes</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html" class="active"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 12: Troubleshooting: Production Diagnostics, Common Pitfalls, and Failure Modes</h1>
+
+<p>Deploying hardened LangChain systems to enterprise production introduces failure modes spanning authentication boundaries, policy evaluation timeouts, vector retrieval pruning, and agent reasoning loops. When policy enforcement is strictly fail-closed, an upstream misconfiguration or unexpected token format halts execution rather than failing silently.</p>
+
+<p>This chapter provides a concise diagnostic reference for production operations. Using our <strong>Enterprise Incident Assistant</strong> demonstrator as a concrete case study, we examine real-world failure patterns and demonstrate how to diagnose and resolve them across your own enterprise AI applications.</p>
+
+<hr />
+
+<h2>Exception Taxonomy &amp; Diagnostic Reason Codes</h2>
+
+<p>The security extension intercepts operations across multiple Policy Enforcement Points (PEPs) and raises typed exceptions derived from <code>SecurityAuthorizationError</code>. Every denial carries a standardized <code>diagnostic_reason</code> to facilitate immediate troubleshooting:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Typed Exception</th>
+      <th>Diagnostic Reason Code</th>
+      <th>Enforcement Point</th>
+      <th>Primary Root Cause</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>TenantIsolationError</code></td>
+      <td><code>TENANT_MISMATCH</code></td>
+      <td><code>SecureRunnable</code> / Agent Gate</td>
+      <td>Caller tenant does not match target agent tenant boundary.</td>
+    </tr>
+    <tr>
+      <td><code>AgentAccessDeniedException</code></td>
+      <td><code>INSUFFICIENT_CLEARANCE</code><br /><code>MISSING_REQUIRED_ROLE</code></td>
+      <td><code>SecureRunnable</code> / Agent Gate</td>
+      <td>Caller role not in authorized role graph, or clearance rank too low.</td>
+    </tr>
+    <tr>
+      <td><code>ToolExecutionDeniedError</code></td>
+      <td><code>PARAMETER_CONSTRAINT_FAILED</code><br /><code>FAIL_CLOSED_NULL_ENTITY</code></td>
+      <td><code>@secured_tool</code> PEP</td>
+      <td>CEL argument expression failed, or entity resolver returned <code>None</code>.</td>
+    </tr>
+    <tr>
+      <td><code>ToolExecutionFeedbackException</code></td>
+      <td><code>STATUS_BLOCKED_BY_POLICY</code></td>
+      <td><code>@secured_tool</code> PEP</td>
+      <td>Informational tool denied; returns safe refusal payload to LLM.</td>
+    </tr>
+    <tr>
+      <td><code>IngestionRejectedException</code></td>
+      <td><code>INGEST_REJECTED</code></td>
+      <td><code>SecureVectorStoreIngestor</code></td>
+      <td>Chunk missing mandatory <code>sec:*</code> metadata in strict fail-closed mode.</td>
+    </tr>
+    <tr>
+      <td><code>SecurityAuthorizationError</code></td>
+      <td><code>INVALID_HMAC</code></td>
+      <td><code>SecureRetriever</code></td>
+      <td>Tampered metadata or HMAC secret mismatch on stored vector chunks.</td>
+    </tr>
+    <tr>
+      <td><code>PromptInjectionDetectedException</code></td>
+      <td><code>PROMPT_INJECTION_DETECTED</code></td>
+      <td><code>RunnableGuard</code> / Scanner</td>
+      <td>Inbound prompt matched injection heuristics or structural exploit.</td>
+    </tr>
+    <tr>
+      <td><code>AuditBufferFullException</code></td>
+      <td><code>AUDIT_BUFFER_FULL</code></td>
+      <td><code>AuditManager</code> Worker</td>
+      <td>SIEM collector unresponsive; buffer overflowed under backpressure.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>1. Identity &amp; Context Propagation Pitfalls</h2>
+
+<h3>Symptom: Requests Fall Back to Anonymous (Clearance 0, Deny-All)</h3>
+<p>Authorized users suddenly receive <code>AgentAccessDeniedException</code> or queries return zero vector results because the retriever injected the unauthenticated sentinel: <code>{"sec:tenant_id": "__DENY_ALL__"}</code>.</p>
+
+<div class="callout-card">
+  <h4>Case Study: Async Task Handoff in the Incident Assistant</h4>
+  <p>In the Incident Assistant, incoming FastAPI requests resolve JWT claims via <code>IdentityBridge</code> and store the identity in <code>SecurityContextHolder</code> (using Python <code>contextvars</code>). However, when delegating work from <code>TriageAgent</code> to <code>RemediationAgent</code>, or dispatching tasks to worker threads, Python's <code>contextvars</code> do not automatically cross thread boundaries.</p>
+</div>
+
+<ul>
+  <li><strong>Root Cause:</strong> Invoking downstream chains or secondary agents without passing LangChain's native <code>RunnableConfig</code> drops caller identity, defaulting execution to <code>SecurityIdentity.anonymous()</code>.</li>
+  <li><strong>Remediation:</strong> Always propagate identity explicitly inside the execution configuration:
+    <p>You can inspect how identity is bridged into <code>run_config</code> and passed to downstream agents in <code>app/routers/tickets.py</code> of the assistant.</p>
+    <div class="code-block-container code-block-library">
+      <div class="code-block-header">
+        <div class="code-block-title">
+          <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
+          <span class="code-filename">security_core/identity.py</span>
+        </div>
+        <span class="code-lang">PYTHON</span>
+      </div>
+      <pre><code class="language-python"># Correct pattern: forward active identity via RunnableConfig
+run_config = IdentityBridge.create_runnable_config(caller_identity)
+remediation_agent.invoke(inputs, config=run_config)</code></pre>
+    </div>
+  </li>
+</ul>
+
+<hr />
+
+<h2>2. Policy Decision Point (PDP) &amp; Circuit Breaker Failures</h2>
+
+<h3>Symptom: Intermittent Failures with "PDP circuit breaker is OPEN"</h3>
+<p>The application abruptly halts all tool and agent executions with fail-closed rejections, even for privileged administrators.</p>
+
+<ul>
+  <li><strong>Root Cause:</strong> When <code>security.pdp.mode=OPA</code> is enabled, remote HTTP latency spikes exceeding <code>security.pdp.opa.timeout</code> (default: 50ms) cause repeated evaluation timeouts, tripping the circuit breaker threshold.</li>
+  <li><strong>Enterprise Best Practice:</strong>
+    <ul>
+      <li><strong>Enable Local Safety Fallback:</strong> Configure the remote adapter with <code>fallback_engine=base_engine</code>. When the remote OPA cluster is partitioned, the adapter safely falls back to local in-process RBAC/CEL rules rather than halting business operations.</li>
+      <li><strong>Tune Thresholds:</strong> For distributed clusters, set <code>security.pdp.circuitbreaker.threshold=3</code> and increase timeout to <code>0.1</code> (100ms) to accommodate temporary network jitter.</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>Symptom: Stale Authorization After Identity or Role Revocation</h3>
+<ul>
+  <li><strong>Root Cause:</strong> The Two-Tier Decision Cache retains static decisions in Tier 2 (L2) for the duration of <code>security.cache.l2.ttl</code> (default: 60s). If an IAM role is revoked, cached decisions allow unauthorized actions until expiry.</li>
+  <li><strong>Remediation:</strong> Wire your enterprise IAM / SCIM revocation events directly to PDP cache invalidation:
+    <p>You can inspect the full implementation in <code>app/security/user_registry.py</code> and <code>app/security/security_integration.py</code> of the assistant.</p>
+    <div class="code-block-container code-block-assistant">
+      <div class="code-block-header">
+        <div class="code-block-title">
+          <span class="code-badge code-badge-assistant">DEMO APP (SNIPPET)</span>
+          <span class="code-filename">app/security/user_registry.py</span>
+        </div>
+        <span class="code-lang">PYTHON</span>
+      </div>
+      <pre><code class="language-python"># Evict subject immediately upon permission change
+from app.security.security_integration import get_opa_cache_invalidation_handler
+get_opa_cache_invalidation_handler().on_invalidation_event({"subject_id": user_email})</code></pre>
+    </div>
+  </li>
+</ul>
+
+<hr />
+
+<h2>3. Knowledge Ingestion &amp; Vector Retrieval Traps</h2>
+
+<h3>Symptom: Ingestion Batch Aborts Atomically</h3>
+<ul>
+  <li><strong>Root Cause:</strong> In <code>STRICT_FAIL_CLOSED</code> mode, <code>SecureVectorStoreIngestor</code> rejects the entire batch if a single chunk lacks mandatory metadata (e.g., <code>sec:tenant_id</code> or <code>sec:clearance</code>).</li>
+  <li><strong>Remediation:</strong> For bulk backfills of legacy documentation, switch temporarily to <code>EVERYTHING_CLASSIFIED</code> (quarantine mode). Unlabelled chunks are automatically stamped with <code>sec:quarantined = True</code> and elevated to <code>RESTRICTED</code>, allowing the batch to complete while keeping unclassified data isolated from regular users.</li>
+</ul>
+
+<h3>Symptom: Top-K Starvation in RAG Pipelines</h3>
+<p>The vector store contains matching runbooks, but the retriever returns only 1 or 2 chunks instead of the requested <code>k=5</code>, causing the LLM to hallucinate or state that it lacks sufficient context.</p>
+
+<ul>
+  <li><strong>Root Cause:</strong> Vector similarity search retrieves top-K raw candidates, but post-retrieval in-memory pruning drops chunks whose classification rank exceeds caller clearance or whose department tags mismatch.</li>
+  <li><strong>Remediation:</strong> Configure candidate oversampling via <code>security.retriever.oversampling</code> (e.g., <code>3.0</code> to <code>5.0</code>). <code>SecureRetriever</code> fetches <code>k * oversampling_factor</code> candidates from the vector database so sufficient valid records survive security pruning.</li>
+</ul>
+
+<h3>Symptom: Chunks Rejected with "INVALID_HMAC"</h3>
+<ul>
+  <li><strong>Root Cause:</strong> The HMAC signature (<code>sec:envelope_hash</code>) fails cryptographic verification because <code>security.hmac.secret</code> was rotated without re-indexing, or an external script modified chunk metadata directly in Chroma/Pinecone.</li>
+  <li><strong>Remediation:</strong> Never update vector metadata out-of-band. Always update documents through <code>SecureVectorStoreIngestor</code> to ensure HMAC signatures remain consistent.</li>
+</ul>
+
+<hr />
+
+<h2>4. Tool Interception, CEL Rules, and Agent Looping</h2>
+
+<h3>Symptom: CEL Denials with "FAIL_CLOSED_NULL_ENTITY"</h3>
+<ul>
+  <li><strong>Root Cause:</strong> A CEL expression checks an entity attribute (e.g., <code>entities.server[args.server_name].ownerDepartment == subject.dept</code>), but <code>EntityResolver.resolve_entity()</code> returned <code>None</code> because the entity key was invalid or missing. The engine safely fails closed.</li>
+  <li><strong>Remediation:</strong> Ensure your <code>EntityResolver</code> differentiates between <em>missing entity data</em> (raise an informative application error) and <em>unauthorized access</em>.</li>
+</ul>
+
+<h3>Symptom: Runaway Agent Terminated with "TOOL_RETRY_BUDGET_EXCEEDED"</h3>
+<ul>
+  <li><strong>Root Cause:</strong> When a tool access attempt is denied, models configured with weak refusal prompts frequently enter infinite loops, retrying the denied tool with minor parameter mutations until exhausting <code>security.retry.maxViolations</code> (default: 3).</li>
+  <li><strong>Remediation:</strong>
+    <ul>
+      <li>Use <code>on_denial="MODEL_FEEDBACK"</code> for informational tools to provide clear refusal reasoning back to the model context.</li>
+      <li>Reserve <code>on_denial="HARD_ABORT"</code> strictly for state-altering, mutative actions (e.g., server reboots, firewall rule updates).</li>
+      <li>Ensure the agent's system prompt instructs the model to acknowledge policy denials and explain restrictions to the user rather than re-attempting blocked tools.</li>
+    </ul>
+  </li>
+</ul>
+
+<hr />
+
+<h2>5. Telemetry Backpressure &amp; Sanitization Over-Redaction</h2>
+
+<h3>Symptom: LLM Receives Mangled Prompts or Broken Code</h3>
+<ul>
+  <li><strong>Root Cause:</strong> Setting <code>security.pii.redaction.scope=full_in_flight</code> applies destructive one-way redaction across inbound user prompts, retrieved RAG chunks, and tool outputs. Aggressive NER or regex patterns replace technical identifiers, IP addresses, or code snippets with <code>[REDACTED_PII]</code> before the model processes them.</li>
+  <li><strong>Remediation:</strong> Keep <code>security.pii.redaction.scope=audit_only</code> for internal applications. This ensures prompts and tool outputs reach the LLM uncorrupted, while redacting sensitive tokens strictly in audit logs and SIEM exports.</li>
+</ul>
+
+<h3>Symptom: High Volume of "DROP_OLDEST_WITH_METRIC" SIEM Alerts</h3>
+<ul>
+  <li><strong>Root Cause:</strong> The asynchronous audit ring buffer reached capacity because the remote SIEM endpoint (e.g., Splunk HEC) is experiencing network latency or rate-limiting. To preserve inference latency, the daemon worker thread drops oldest non-critical events.</li>
+  <li><strong>Remediation:</strong> Check network connectivity to your SIEM endpoint, verify HEC authentication tokens, and increase buffer capacity if your application handles bursty traffic.</li>
+</ul>
+
+<hr />
+
+<h2>Production Health Check Checklist</h2>
+
+<p>Before promoting any LangChain-based service to production, verify these core security invariants:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Inspection Item</th>
+      <th>Target Configuration</th>
+      <th>Expected Production Behavior</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Identity Handoff</strong></td>
+      <td><code>RunnableConfig["configurable"]["security_identity"]</code></td>
+      <td>Identity preserved across multi-agent hops; zero fallback to anonymous.</td>
+    </tr>
+    <tr>
+      <td><strong>PDP Fallback</strong></td>
+      <td><code>fallback_engine=base_engine</code></td>
+      <td>Graceful in-process RBAC fallback if remote OPA cluster is partitioned.</td>
+    </tr>
+    <tr>
+      <td><strong>RAG Oversampling</strong></td>
+      <td><code>security.retriever.oversampling &gt;= 3.0</code></td>
+      <td>Sufficient candidate chunks survive post-retrieval clearance pruning.</td>
+    </tr>
+    <tr>
+      <td><strong>Tool Denial Mode</strong></td>
+      <td><code>HARD_ABORT</code> (mutative) / <code>MODEL_FEEDBACK</code> (read-only)</td>
+      <td>Destructive actions fail instantly; read-only tools guide LLM gracefully.</td>
+    </tr>
+    <tr>
+      <td><strong>PII Scope</strong></td>
+      <td><code>security.pii.redaction.scope=audit_only</code></td>
+      <td>In-flight prompts unmodified; audit logs and SIEM streams scrubbed.</td>
+    </tr>
+    <tr>
+      <td><strong>Audit Buffer</strong></td>
+      <td>Ring buffer active with background daemon thread</td>
+      <td>Security telemetry dispatched off-inference-path with 0ms latency penalty.</td>
+    </tr>
+  </tbody>
+</table>
+  </main>
+</div>
+</body>
+</html>

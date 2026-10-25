@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Introduction and ToC</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html" class="active"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools & APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Enterprise Implementation Guide: <br>Securing LangChain Within Your Existing Stack</h1>
+
+<table>
+    <tr>
+        <td>
+            <p>Integrating GenAI agents into your enterprise workflow is a multi-level exercise in security. The <code>langchain-security-extension</code> library is designed as a non-invasive, modular security layer that slips between your existing application services, LangChain execution flows, and downstream enterprise resources. It bridges your current Identity Provider (IdP), role-based access control (RBAC) databases, vector databases, and enterprise logging platforms (SIEM) directly into LangChain components.</p>
+            <p>This guide provides a practical, step-by-step roadmap for architects and lead engineers to harden their own enterprise applications with minimal disruption. Rather than discussing security in the abstract, each chapter uses a concrete reference application—an Enterprise IT Incident &amp; Service Desk Assistant (<code>langchain-enterprise-incident-assistant</code>)—as a working example to illustrate how to implement each boundary.</p>
+            <p>Throughout each chapter, you will trace how a working application with standard perimeter security (the <code>master</code> branch) is incrementally transformed into a hardened, zero-trust system (the <code>secured3</code> branch, captured in <code>master..secured3.diff</code>)—demonstrating how to inject caller identity into execution runnables, enforce fine-grained Common Expression Language (CEL) tool constraints, securely filter runbook retrieval, and stream structured audit events into enterprise SIEMs.</p>
+        </td>
+        <td>
+            <div class="callout-card">
+                <h4>Reference Implementation Repository:</h4>
+                Application: <code>langchain-enterprise-incident-assistant</code> (FastAPI + LangChain)
+                <ul>
+                    <li><code>master</code> branch: Baseline enterprise deployment using standard perimeter Bearer JWTs, an in-memory user registry, and manual authorization checks in Python code.</li>
+                    <li><code>secured3</code> branch: The hardened production target utilizing this library's <code>@secured_tool</code> guards, <code>SecureRetriever</code> envelope validation, <code>EmbeddedPolicyEngine</code> role DAGs, and real-time SIEM audit streaming (see <code>master..secured3.diff</code>).</li>
+                </ul>
+            </div>
+        </td>
+    </tr>
+</table>
+
+
+<h2>Table of Contents</h2>
+<ol>
+    <li><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><strong> Architecture Blueprint &amp; System Boundaries</strong></a></br>
+    <em>Overview:</em> Understand how the library acts as an inline security checkpoint (Policy Enforcement Point or PEP) between your users, LangChain workflows, and data sources without relying on fragile thread-local variables.</li>
+    <li><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><strong> Connecting Your Identity Provider: Passing User Credentials into LangChain</strong></a></br>
+    <em>Overview:</em> Implement the identity bridge (<code>IdentityBridge</code>) to extract user tokens (JWT, session, or headers) from your web frameworks (such as FastAPI or Flask) and carry caller roles securely through LangChain's native execution configuration (<code>RunnableConfig</code>).</li>
+    <li><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><strong> Setting Up Your Authorization Engine: Choosing Between Embedded RBAC and External Policy Engines (OPA)</strong></a></br>
+    <em>Overview:</em> Choose between running the zero-dependency embedded policy engine (the Policy Decision Point or PDP—the "rule evaluation brain") using local role trees, or plugging in your centralized enterprise policy service like Open Policy Agent (OPA) via an external adapter.</li>
+    <li><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><strong> Securing the Front Door: Protecting Agents and Execution Entry Points</strong></a></br>
+    <em>Overview:</em> Wrap your standard LangChain chains and agents with entry proxies (<code>SecureRunnable</code>) that immediately reject unauthorized users before prompt construction or language model token consumption occurs.</li>
+    <li><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><strong> Security Labeling and Admission Control in the Ingestion Pipeline: Labeling Document Chunks for Vector Storage</strong></a></br>
+    <em>Overview:</em> Integrate security enrichers and admission control into your ETL and document splitting pipelines to automatically stamp classification tiers, department tags, and role restrictions (<code>sec:*</code> metadata) onto document chunks, validate envelopes, and enforce fail-closed or quarantine admission policies before indexing.</li>
+    <li><a href="6.%20Integrating%20Your%20Vector%20Database.html"><strong> Integrating Your Vector Database: Permission-Aware Search and Data Pruning</strong></a></br>
+    <em>Overview:</em> Configure the secure retriever (<code>SecureRetriever</code>) to convert user identities into native database search filters and use in-memory pruning with candidate oversampling so restricted enterprise documents never enter the model's context window.</li>
+    <li><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><strong> Guarding Tools and Enterprise APIs: Parameter Rules, Safe Refusals, and Hard Halts</strong></a></br>
+    <em>Overview:</em> Intercept tool calls prior to execution using Common Expression Language (CEL—a simple, safe rule format) to validate arguments, halting destructive tools instantly while letting informational tools return safe refusal messages to the model.</li>
+    <li><a href="8.%20Defending%20Against%20Agent%20Looping.html"><strong> Defending Against Agent Looping: Setting Retry Budgets and Abuse Throttles</strong></a></br>
+    <em>Overview:</em> Configure denial tracking and turn-based retry allowances to automatically stop runaway agents from repeatedly attempting unauthorized tool executions or brute-forcing API parameters.</li>
+    <li><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"> <strong> Sanitizing Sensitive Payloads: Masking Secrets and PII in Execution Payloads</strong></a></br>
+    <em>Overview:</em> Enable automated parameter redactors and credential scanners to strip out passwords, bearer tokens, and sensitive fields before telemetry payloads leave the application process.</li>
+    <li><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><strong> Connecting to Enterprise SIEM and Log Aggregators: Writing to Splunk, Elastic, or OpenTelemetry</strong></a></br>
+    <em>Overview:</em> Implement the audit publisher interface (<code>SecurityAuditPublisher</code>) to stream structured, tamper-evident security events into your logging systems using background workers that never delay model response times.</li>
+    <li><a href="11.%20Enforcing%20Multi-Tenancy.html"><strong> Enforcing Multi-Tenancy: Isolating Workspaces, Chunks, and Execution Bounds</strong></a></br>
+    <em>Overview:</em> Ensure multi-tenant partition keys (<code>tenant_id</code>) remain strictly isolated across request contexts, vector queries, and tool actions—even when using permissive fallback policies.</li>
+    <li><a href="12.Troubleshooting.html"><strong> Troubleshooting: Production Diagnostics, Common Pitfalls, and Failure Modes</strong></a></br>
+    <em>Overview:</em> Diagnose and remediate common production failure modes across authentication boundaries, remote PDP circuit breakers, vector pruning, agent retry loops, and telemetry backpressure.</li>
+</ol>
+  </main>
+</div>
+</body>
+</html>
