@@ -1,12 +1,15 @@
 # LangChain Security Extension
 
 [![Python Versions](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://pypi.org/project/langchain-security-extension/)
+[![Documentation](https://img.shields.io/badge/docs-Implementation%20Guide-blue.svg)](https://prashantdev.github.io/langchain-security-extension/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/prashantdev/langchain-security-extension/actions)
 [![Zero-Dependency Core](https://img.shields.io/badge/core%20deps-zero%20dependencies-success.svg)](src/security_core)
 [![LangChain Compatible](https://img.shields.io/badge/LangChain-LCEL%20%26%20LangGraph-1C3C3C.svg)](https://python.langchain.com/)
 
 > **Quick Intro:** This library provides deterministic, code-level Policy Enforcement Points (PEPs) for LangChain and LangGraph agents—shifting organizations from fragile, prompt-dependent guardrails to deterministic, enterprise-grade governance.
+>
+> 📖 **[Read the Enterprise Implementation Guide](https://prashantdev.github.io/langchain-security-extension/)** for step-by-step architecture patterns, policy authoring, and production rollout instructions.
 
 ### ✨ Strategic Advantages
 
@@ -252,15 +255,18 @@ sequenceDiagram
 
 ---
 
-## 🧪 Live Demonstrator Application
+## 📖 Enterprise Implementation Guide & Reference App
 
-To see this library defend a real-world enterprise agent against prompt injection, unauthorized tool execution, and RAG data leakage, visit the companion demonstrator repository:
+Ready to adopt `langchain-security-extension` in your organization?
 
-👉 **[Enterprise IT Incident & Service Desk Assistant](https://github.com/prashantdev/langchain-enterprise-incident-assistant)**
+1. 📘 **[Enterprise Implementation Guide](https://prashantdev.github.io/langchain-security-extension/)**  
+   The complete guide to rolling out deterministic security in production—covering Identity Provider (IdP) wiring, CEL & OPA policy authoring, RAG metadata signing, DLP sanitization, and SIEM telemetry.
 
-- **Unhardened baseline (`master` branch):** Demonstrates real prompt injection vulnerabilities, bypassing standard LLM system prompts and causing unauthorized tool calls.
-- **Hardened application (`secured3` branch):** Demonstrates 100% deterministic interception by `langchain-security-extension`, blocking unauthorized actions and streaming structured audit logs (OCSF / ECS / RFC 5424) without token overhead.
-- Includes automated test suites: `./run-security-suite.sh --suite basic` and `./run-security-suite.sh --suite guardrail`.
+2. 🧪 **[Companion Reference Application: Enterprise IT Incident Assistant](https://github.com/prashantdev/langchain-enterprise-incident-assistant)**  
+   The live demonstrator codebase used throughout the implementation guide to illustrate a real-world migration from fragile prompt guardrails to deterministic enforcement:
+   - **Unhardened baseline (`master` branch):** Demonstrates real prompt injection vulnerabilities, bypassing standard LLM system prompts and causing unauthorized tool calls.
+   - **Hardened implementation (`secured3` branch):** Shows the complete, production-grade integration of `langchain-security-extension` following the implementation guide.
+   - **Automated verification suites:** Run `./run-security-suite.sh --suite basic` and `./run-security-suite.sh --suite guardrail` to verify defenses and audit streaming in action.
 
 ---
 
