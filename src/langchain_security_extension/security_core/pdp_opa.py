@@ -2,7 +2,7 @@
 Policy Decision Point (PDP) Open Policy Agent (OPA) integration re-exports.
 """
 
-from security_pdp_opa.opa_adapter import (
+from langchain_security_extension.security_pdp_opa.opa_adapter import (
     RemotePDPAdapter,
     CircuitBreakerState,
     OPACacheInvalidationHandler,

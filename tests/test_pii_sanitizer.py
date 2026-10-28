@@ -3,34 +3,25 @@ Unit tests for PiiSanitizerSPI, BuiltInPiiSanitizer, and in-flight redaction sco
 """
 
 import unittest
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional
 
-from security_core.constants import (
-    DEFAULT_PAYLOAD_MAX_CHARS,
+from langchain_security_extension.security_core.constants import (
     PII_SCOPE_AUDIT_ONLY,
-    PII_SCOPE_DISABLED,
     PII_SCOPE_FULL_IN_FLIGHT,
     PII_STAGE_AUDIT_PAYLOAD,
     PII_STAGE_INBOUND_PROMPT,
-    PII_STAGE_OUTBOUND_RESPONSE,
-    PII_STAGE_TOOL_ARGUMENT,
-    PII_STAGE_TOOL_OUTPUT,
-    PII_STAGE_RETRIEVAL_DOCUMENT,
-    DECISION_PERMIT,
     CLEARANCE_RANK_PUBLIC,
     CLEARANCE_RANK_RESTRICTED,
 )
-from security_core.identity import SecurityIdentity
-from security_core.pdp import EmbeddedPolicyEngine
-from security_core.audit import AuditEvent, AuditManager
-from security_core.pii import (
+from langchain_security_extension.security_core.identity import SecurityIdentity
+from langchain_security_extension.security_core.pdp import EmbeddedPolicyEngine
+from langchain_security_extension.security_core.pii import (
     BuiltInPiiSanitizer,
     PiiContext,
     PiiSanitizerSPI,
     get_pii_sanitizer,
     set_pii_sanitizer,
     reset_pii_sanitizer,
-    get_pii_scope,
     set_pii_scope,
     reset_pii_scope,
     is_valid_luhn,
@@ -38,9 +29,8 @@ from security_core.pii import (
     is_valid_aadhaar,
     is_valid_pan,
 )
-from security_adapter_langchain.runnable_guard import SecureRunnable
-from security_adapter_langchain.tool_decorator import secured_tool
-from security_adapter_langchain.retriever_wrapper import SecureRetriever, SecureDocument
+from langchain_security_extension.security_adapter_langchain.runnable_guard import SecureRunnable
+from langchain_security_extension.security_adapter_langchain.tool_decorator import secured_tool
 
 
 class CustomEnterpriseSanitizer(PiiSanitizerSPI):

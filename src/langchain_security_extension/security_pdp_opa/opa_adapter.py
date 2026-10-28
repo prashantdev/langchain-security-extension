@@ -8,10 +8,9 @@ as specified in Spec 4.
 import time
 from enum import Enum
 from typing import Dict, Any, Optional
-from security_core.pdp import PolicyDecisionEngine, PolicyEvaluationRequest, PolicyDecision, TwoTierDecisionCache
-from security_core.audit import AuditManager, AuditEvent
-from security_core.constants import (
-    DECISION_PERMIT,
+from langchain_security_extension.security_core.pdp import PolicyDecisionEngine, PolicyEvaluationRequest, PolicyDecision, TwoTierDecisionCache
+from langchain_security_extension.security_core.audit import AuditManager, AuditEvent
+from langchain_security_extension.security_core.constants import (
     DECISION_DENY,
     DEFAULT_REMOTE_PDP_TIMEOUT_SECONDS,
     DEFAULT_CIRCUIT_BREAKER_THRESHOLD,

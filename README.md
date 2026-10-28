@@ -5,7 +5,7 @@
 [![Implementation Guide](https://img.shields.io/badge/docs-Implementation%20Guide-orange.svg)](https://prashantdev.github.io/langchain-security-extension/guides/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/prashantdev/langchain-security-extension/actions)
-[![Zero-Dependency Core](https://img.shields.io/badge/core%20deps-zero%20dependencies-success.svg)](src/security_core)
+[![Zero-Dependency Core](https://img.shields.io/badge/core%20deps-zero%20dependencies-success.svg)](src/langchain_security_extension/security_core)
 [![LangChain Compatible](https://img.shields.io/badge/LangChain-LCEL%20%26%20LangGraph-1C3C3C.svg)](https://python.langchain.com/)
 
 > **Quick Intro:** This library provides deterministic, code-level Policy Enforcement Points (PEPs) for LangChain and LangGraph agents—shifting organizations from fragile, prompt-dependent guardrails to deterministic, enterprise-grade governance.
@@ -37,24 +37,27 @@ pip install langchain-security-extension
 Wrap any tool callable with deterministic CEL (Common Expression Language) parameter constraints, clearance floors, and RBAC/ABAC. Caller identity travels in-band across all agent steps via LangChain's native `RunnableConfig`—with **zero LLM prompt overhead**:
 
 ```python
-from security_adapter_langchain import secured_tool
-from security_core import IdentityBridge, SecurityIdentity, ToolExecutionDeniedError
+from langchain_security_extension.security_adapter_langchain import secured_tool
+from langchain_security_extension.security_core import IdentityBridge, SecurityIdentity, ToolExecutionDeniedError
+
 
 # 1. Protect any tool with deterministic CEL argument constraints
 @secured_tool(
-    required_roles=["DEVOPS"],
-    min_clearance=1,
-    cel_expression="args.server.startsWith('prod-') ? subject.dept == 'INFRA' : true",
-    is_mutative=True
+   required_roles=["DEVOPS"],
+   min_clearance=1,
+   cel_expression="args.server.startsWith('prod-') ? subject.dept == 'INFRA' : true",
+   is_mutative=True
 )
 def example_tool_op_reboot_server(server: str) -> str:
-    return f"Rebooted {server}"
+   return f"Rebooted {server}"
+
 
 # Helper: attach identity to LangChain RunnableConfig
 def caller(dept: str):
-    return IdentityBridge.create_runnable_config(
-        SecurityIdentity.create("alice", "CORP", {"DEVOPS"}, 1, dept)
-    )
+   return IdentityBridge.create_runnable_config(
+      SecurityIdentity.create("alice", "CORP", {"DEVOPS"}, 1, dept)
+   )
+
 
 # 2. Authorized caller (DEVOPS + INFRA) -> PERMIT
 print(example_tool_op_reboot_server("prod-db-01", config=caller("INFRA")))
@@ -104,53 +107,54 @@ except ToolExecutionDeniedError as e:
 
 ## 🧩 Core Capabilities
 
-### 1. [`@secured_tool`](src/security_adapter_langchain/tool_decorator.py) — Pre-Execution Tool Guardrails
+### 1. [`@secured_tool`](src/langchain_security_extension/security_adapter_langchain/tool_decorator.py) — Pre-Execution Tool Guardrails
 Defend critical infrastructure and APIs against prompt-injection tool hijacking. Evaluates Common Expression Language (CEL) rules against the live caller identity and tool arguments before execution starts:
 
 ```python
-from security_adapter_langchain import secured_tool
+from langchain_security_extension.security_adapter_langchain import secured_tool
+
 
 @secured_tool(
-    required_roles=["ADMIN", "DEVOPS"],
-    min_clearance=3,
-    cel_expression="entities.server[args.server_name].ownerDepartment == subject.dept || subject.clearance >= 3",
-    is_mutative=True,
-    masked_params=["password", "secret", "api_key"]
+   required_roles=["ADMIN", "DEVOPS"],
+   min_clearance=3,
+   cel_expression="entities.server[args.server_name].ownerDepartment == subject.dept || subject.clearance >= 3",
+   is_mutative=True,
+   masked_params=["password", "secret", "api_key"]
 )
 def flush_database_cache(server_name: str, flush_level: str) -> str:
-    """Flush cache on designated server cluster."""
-    return f"Cache flushed on {server_name}."
+   """Flush cache on designated server cluster."""
+   return f"Cache flushed on {server_name}."
 ```
 
-### 2. [`SecureRunnable`](src/security_adapter_langchain/runnable_guard.py) — Agent Boundary Access Gate
+### 2. [`SecureRunnable`](src/langchain_security_extension/security_adapter_langchain/runnable_guard.py) — Agent Boundary Access Gate
 Guard agent entrypoints and enforce multi-tenant isolation boundaries in LangChain LCEL workflows:
 
 ```python
-from security_adapter_langchain import SecureRunnable
-from security_core import EmbeddedPolicyEngine
+from langchain_security_extension.security_adapter_langchain import SecureRunnable
+from langchain_security_extension.security_core import EmbeddedPolicyEngine
 
 pdp = EmbeddedPolicyEngine.create()
 
 secured_remediation_agent = SecureRunnable.wrap(
-    runnable=remediation_agent_executor,
-    pdp_engine=pdp,
-    agent_name="remediation-agent",
-    required_roles=["TIER2_SUPPORT"],
-    min_clearance=2,
-    target_tenant="CORP_MAIN"
+   runnable=remediation_agent_executor,
+   pdp_engine=pdp,
+   agent_name="remediation-agent",
+   required_roles=["TIER2_SUPPORT"],
+   min_clearance=2,
+   target_tenant="CORP_MAIN"
 )
 ```
 
-### 3. [`SecureRetriever`](src/security_adapter_langchain/retriever_wrapper.py) — Knowledge Base & RAG Pre-Filtering
+### 3. [`SecureRetriever`](src/langchain_security_extension/security_adapter_langchain/retriever_wrapper.py) — Knowledge Base & RAG Pre-Filtering
 Stop context window leakage of unauthorized documents. Applies vector database pre-filters, verifies signed `sec:*` metadata envelopes, and performs post-retrieval clearance pruning:
 
 ```python
-from security_adapter_langchain import SecureRetriever
+from langchain_security_extension.security_adapter_langchain import SecureRetriever
 
 secure_retriever = SecureRetriever.wrap(
-    retriever=chroma_store.as_retriever(),
-    pdp_engine=pdp,
-    document_namespace="it_runbooks"
+   retriever=chroma_store.as_retriever(),
+   pdp_engine=pdp,
+   document_namespace="it_runbooks"
 )
 ```
 
@@ -211,9 +215,9 @@ flowchart TB
 
 | Zero-Trust Role | Library Component | Implementation Responsibilities |
 |---|---|---|
-| **PEP**<br/>(Policy Enforcement Point) | [`@secured_tool`](src/security_adapter_langchain/tool_decorator.py)<br/>[`SecureRunnable`](src/security_adapter_langchain/runnable_guard.py)<br/>[`SecureRetriever`](src/security_adapter_langchain/retriever_wrapper.py)<br/>[`LangGraphNodeGuard`](src/security_adapter_langchain/langgraph_integration.py) | • Intercepts execution requests before tool/chain execution.<br/>• Enforces caller role and clearance floors.<br/>• Applies vector DB metadata pre-filters and prunes documents.<br/>• Emits immutable structured audit events to SIEM. |
-| **PDP**<br/>(Policy Decision Point) | [`EmbeddedPolicyEngine`](src/security_core/pdp.py)<br/>[`RemoteOpaAdapter`](src/security_pdp_opa/opa_adapter.py) | • Evaluates authorization requests deterministically.<br/>• Manages two-tier decision caching (L1 thread-local, L2 LRU TTL).<br/>• Resolves hierarchical role graphs and multi-tenant isolation.<br/>• Evaluates fail-closed / fail-open circuit breakers on remote PDP outages. |
-| **PIP**<br/>(Policy Information Point) | [`IdentityBridge`](src/security_core/identity.py)<br/>[`EntityAttributeResolverSPI`](src/security_core/registry.py) | • Converts inbound JWT/OAuth claims into immutable `SecurityIdentity`.<br/>• Injects identity into LangChain's native `RunnableConfig`.<br/>• Resolves dynamic entity attributes (e.g. server owner, user dept) for CEL rules. |
+| **PEP**<br/>(Policy Enforcement Point) | [`@secured_tool`](src/langchain_security_extension/security_adapter_langchain/tool_decorator.py)<br/>[`SecureRunnable`](src/langchain_security_extension/security_adapter_langchain/runnable_guard.py)<br/>[`SecureRetriever`](src/langchain_security_extension/security_adapter_langchain/retriever_wrapper.py)<br/>[`LangGraphNodeGuard`](src/langchain_security_extension/security_adapter_langchain/langgraph_integration.py) | • Intercepts execution requests before tool/chain execution.<br/>• Enforces caller role and clearance floors.<br/>• Applies vector DB metadata pre-filters and prunes documents.<br/>• Emits immutable structured audit events to SIEM. |
+| **PDP**<br/>(Policy Decision Point) | [`EmbeddedPolicyEngine`](src/langchain_security_extension/security_core/pdp.py)<br/>[`RemoteOpaAdapter`](src/langchain_security_extension/security_pdp_opa/opa_adapter.py) | • Evaluates authorization requests deterministically.<br/>• Manages two-tier decision caching (L1 thread-local, L2 LRU TTL).<br/>• Resolves hierarchical role graphs and multi-tenant isolation.<br/>• Evaluates fail-closed / fail-open circuit breakers on remote PDP outages. |
+| **PIP**<br/>(Policy Information Point) | [`IdentityBridge`](src/langchain_security_extension/security_core/identity.py)<br/>[`EntityAttributeResolverSPI`](src/langchain_security_extension/security_core/registry.py) | • Converts inbound JWT/OAuth claims into immutable `SecurityIdentity`.<br/>• Injects identity into LangChain's native `RunnableConfig`.<br/>• Resolves dynamic entity attributes (e.g. server owner, user dept) for CEL rules. |
 | **PAP**<br/>(Policy Administration Point) | Declarative Decorators & CEL Expressions | • Declarative `@secured_tool` parameters (`required_roles`, `min_clearance`).<br/>• Common Expression Language rules evaluated over live arguments.<br/>• Metadata classification schemas (`sec.clearance`, `sec.department`). |
 
 ### PEP Interception Lifecycle

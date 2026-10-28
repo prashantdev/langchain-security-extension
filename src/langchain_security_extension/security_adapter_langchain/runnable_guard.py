@@ -7,10 +7,10 @@ identity context prior to invoking wrapped runnables as specified in Spec 0 and 
 
 import inspect
 from typing import Any, Dict, Optional, List, Iterator, AsyncIterator
-from security_core.identity import SecurityIdentity, SecurityContextHolder, IdentityBridge, InvocationParameters
-from security_core.pdp import PolicyDecisionEngine, PolicyEvaluationRequest
-from security_core.audit import AuditEvent
-from security_core.constants import (
+from langchain_security_extension.security_core.identity import SecurityIdentity, SecurityContextHolder, IdentityBridge, InvocationParameters
+from langchain_security_extension.security_core.pdp import PolicyDecisionEngine, PolicyEvaluationRequest
+from langchain_security_extension.security_core.audit import AuditEvent
+from langchain_security_extension.security_core.constants import (
     ACTION_AGENT_INVOKE,
     EVENT_AGENT_ACCESS_DENIED,
     PEP_RUNNABLE_ENTRY,
@@ -21,9 +21,9 @@ from security_core.constants import (
     PII_STAGE_INBOUND_PROMPT,
     PII_STAGE_OUTBOUND_RESPONSE,
 )
-from security_core.exceptions import AgentAccessDeniedException, SecurityAuthorizationError
-from security_adapter_langchain.callback_handler import SecureCallbackHandler
-from security_core.pii import get_pii_sanitizer, get_pii_scope, PiiContext
+from langchain_security_extension.security_core.exceptions import AgentAccessDeniedException
+from langchain_security_extension.security_adapter_langchain.callback_handler import SecureCallbackHandler
+from langchain_security_extension.security_core.pii import get_pii_sanitizer, get_pii_scope, PiiContext
 
 
 

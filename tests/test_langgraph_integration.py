@@ -1,8 +1,8 @@
 import unittest
-from security_core.identity import SecurityIdentity, InvocationParameters
-from security_core.pdp import EmbeddedPolicyEngine
-from security_core.exceptions import SecurityAuthorizationError
-from security_adapter_langchain.langgraph_integration import LangGraphNodeGuard
+from langchain_security_extension.security_core.identity import SecurityIdentity, InvocationParameters
+from langchain_security_extension.security_core.pdp import EmbeddedPolicyEngine
+from langchain_security_extension.security_core.exceptions import SecurityAuthorizationError
+from langchain_security_extension.security_adapter_langchain.langgraph_integration import LangGraphNodeGuard
 
 
 class TestLangGraphIntegration(unittest.TestCase):

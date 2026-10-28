@@ -1,6 +1,6 @@
 import unittest
-from security_core.identity import SecurityIdentity, InvocationParameters
-from security_core.constants import SECURITY_INVOCATION_PARAMS_KEY
+from langchain_security_extension.security_core.identity import SecurityIdentity, InvocationParameters
+from langchain_security_extension.security_core.constants import SECURITY_INVOCATION_PARAMS_KEY
 
 
 class TestSecurityIdentity(unittest.TestCase):

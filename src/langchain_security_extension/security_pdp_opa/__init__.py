@@ -5,7 +5,7 @@ Extends Policy Decision Point (PDP) with remote REST integration, circuit breake
 and dynamic cache invalidation as specified in Spec 4.
 """
 
-from security_pdp_opa.opa_adapter import RemotePDPAdapter, OPACacheInvalidationHandler, CircuitBreakerState
+from langchain_security_extension.security_pdp_opa.opa_adapter import RemotePDPAdapter, OPACacheInvalidationHandler, CircuitBreakerState
 
 __all__ = [
     "RemotePDPAdapter",

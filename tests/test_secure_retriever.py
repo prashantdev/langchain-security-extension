@@ -1,7 +1,7 @@
 import unittest
-from security_core.identity import SecurityIdentity
-from security_core.pdp import EmbeddedPolicyEngine
-from security_adapter_langchain.retriever_wrapper import SecureRetriever, SecureDocument
+from langchain_security_extension.security_core.identity import SecurityIdentity
+from langchain_security_extension.security_core.pdp import EmbeddedPolicyEngine
+from langchain_security_extension.security_adapter_langchain.retriever_wrapper import SecureRetriever, SecureDocument
 
 
 class TestSecureRetriever(unittest.TestCase):
@@ -49,7 +49,7 @@ class TestSecureRetriever(unittest.TestCase):
         self.assertEqual(pruned[0].page_content, "Public devops docs")
 
     def test_retriever_store_capability_profiles(self):
-        from security_core.constants import STORE_PROFILE_FULL_AST, STORE_PROFILE_CONSTRAINED, STORE_PROFILE_NO_FILTER
+        from langchain_security_extension.security_core.constants import STORE_PROFILE_FULL_AST, STORE_PROFILE_CONSTRAINED, STORE_PROFILE_NO_FILTER
         pdp = EmbeddedPolicyEngine.create()
         identity = SecurityIdentity.create("user1", "TENANT_A", {"DEVOPS"}, 2, "OPS", {})
 
@@ -67,11 +67,11 @@ class TestSecureRetriever(unittest.TestCase):
         self.assertEqual(len(ast_none), 0)
 
     def test_retriever_secondary_paging_and_audit(self):
-        from security_core.pdp import RoleGraph
-        from security_core.cel_evaluator import CELEvaluator
-        from security_core.audit import AuditManager
+        from langchain_security_extension.security_core.pdp import RoleGraph
+        from langchain_security_extension.security_core.cel_evaluator import CELEvaluator
+        from langchain_security_extension.security_core.audit import AuditManager
         from tests.audit_test_collector import TestAuditCollector
-        from security_core.constants import EVENT_RAG_UNAUTHORIZED_PRUNING
+        from langchain_security_extension.security_core.constants import EVENT_RAG_UNAUTHORIZED_PRUNING
         role_graph = RoleGraph.create()
         cel_eval = CELEvaluator.create()
         audit_logger = TestAuditCollector.create()
@@ -129,7 +129,7 @@ class TestSecureRetriever(unittest.TestCase):
 
     def test_base_retriever_inheritance_and_invoke_delegation(self):
         from langchain_core.retrievers import BaseRetriever
-        from security_core.identity import IdentityBridge
+        from langchain_security_extension.security_core.identity import IdentityBridge
 
         pdp = EmbeddedPolicyEngine.create()
         identity = SecurityIdentity.create("retriever_user", "CORP_X", {"ANALYST"}, 2, "FINANCE", {})

@@ -6,14 +6,14 @@ import os
 import json
 import tempfile
 import unittest
-from security_core.audit import (
+from langchain_security_extension.security_core.audit import (
     AuditEvent,
     AuditSanitizer,
     AuditManager,
     JsonFileAuditLogger,
     OpenTelemetryLogsPublisher,
 )
-from security_core.constants import (
+from langchain_security_extension.security_core.constants import (
     SEVERITY_INFORMATIONAL,
     SEVERITY_CRITICAL_ALERT,
     DECISION_PERMIT,

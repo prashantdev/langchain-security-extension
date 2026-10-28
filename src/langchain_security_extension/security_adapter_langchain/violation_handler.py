@@ -7,10 +7,10 @@ for function-calling agent loops as specified in Spec 2 and Spec 5.
 
 import time
 from typing import Dict, Any, Optional, List
-from security_core.identity import SecurityIdentity, IdentityBridge
-from security_core.pdp import PolicyDecisionEngine
-from security_core.audit import AuditEvent
-from security_core.constants import (
+from langchain_security_extension.security_core.identity import SecurityIdentity, IdentityBridge
+from langchain_security_extension.security_core.pdp import PolicyDecisionEngine
+from langchain_security_extension.security_core.audit import AuditEvent
+from langchain_security_extension.security_core.constants import (
     ACTION_TOOL_EXECUTE,
     PEP_TOOL_INTERCEPTOR,
     SEVERITY_CRITICAL_ALERT,
@@ -19,7 +19,6 @@ from security_core.constants import (
     DEFAULT_ABUSE_WINDOW_SECONDS,
     DEFAULT_ABUSE_MAX_DENIALS,
 )
-from security_core.exceptions import ToolExecutionDeniedError
 
 STATUS_BLOCKED_BY_POLICY: str = "BLOCKED_BY_POLICY"
 POLICY_STATUS_BLOCKED: str = "BLOCKED_POLICY"

@@ -32,10 +32,9 @@ except ImportError:
             self.page_content = page_content
             self.metadata = metadata or {}
 
-from security_core.identity import SecurityIdentity
-from security_core.exceptions import IngestionRejectedException, PromptInjectionDetectedException
-from security_core.audit import AuditManager, AuditEvent
-from security_core.constants import (
+from langchain_security_extension.security_core.exceptions import IngestionRejectedException, PromptInjectionDetectedException
+from langchain_security_extension.security_core.audit import AuditManager, AuditEvent
+from langchain_security_extension.security_core.constants import (
     SEC_SCHEMA_VERSION,
     SEC_DOCUMENT_ID,
     SEC_CHUNK_INDEX,
@@ -72,8 +71,8 @@ from security_core.constants import (
     SEVERITY_WARNING,
     SEVERITY_NOTICE,
 )
-from security_core.prompt_injection import PromptInjectionScanner, PromptInjectionScanResult
-from security_adapter_langchain.retriever_wrapper import SecureDocument
+from langchain_security_extension.security_core.prompt_injection import PromptInjectionScanner, PromptInjectionScanResult
+from langchain_security_extension.security_adapter_langchain.retriever_wrapper import SecureDocument
 
 logger = logging.getLogger("security.ingestion")
 

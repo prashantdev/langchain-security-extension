@@ -3,8 +3,8 @@ Unit tests for OCSF Audit Event Schema, 3-Stage Sanitization, and SIEM publishin
 """
 
 import unittest
-from security_core.audit import AuditEvent, AuditSanitizer, PythonLoggingAuditPublisher, AuditManager
-from security_core.constants import SEVERITY_INFORMATIONAL, DECISION_PERMIT
+from langchain_security_extension.security_core.audit import AuditEvent, AuditSanitizer, AuditManager
+from langchain_security_extension.security_core.constants import SEVERITY_INFORMATIONAL, DECISION_PERMIT
 from tests.audit_test_collector import TestAuditCollector
 
 
@@ -61,7 +61,7 @@ class TestAsyncAuditPipeline(unittest.TestCase):
         self.assertEqual(manager.dropped_count, 1)
 
     def test_audit_manager_default_capacity_and_drop_oldest(self):
-        from security_core.constants import DEFAULT_RING_BUFFER_CAPACITY
+        from langchain_security_extension.security_core.constants import DEFAULT_RING_BUFFER_CAPACITY
         logger = TestAuditCollector.create()
         manager = AuditManager.create(publishers=[logger])
         self.assertEqual(manager._capacity, DEFAULT_RING_BUFFER_CAPACITY)

@@ -5,11 +5,11 @@ Unit tests for SecureRunnable service boundary wrapper.
 import unittest
 import asyncio
 from typing import Dict, Any, Optional
-from security_core.identity import SecurityIdentity, IdentityBridge
-from security_core.pdp import EmbeddedPolicyEngine
-from security_core.exceptions import AgentAccessDeniedException, ToolExecutionDeniedError
-from security_adapter_langchain.runnable_guard import SecureRunnable
-from security_adapter_langchain.violation_handler import ToolViolationHandler, ViolationResolution
+from langchain_security_extension.security_core.identity import SecurityIdentity, IdentityBridge
+from langchain_security_extension.security_core.pdp import EmbeddedPolicyEngine
+from langchain_security_extension.security_core.exceptions import AgentAccessDeniedException, ToolExecutionDeniedError
+from langchain_security_extension.security_adapter_langchain.runnable_guard import SecureRunnable
+from langchain_security_extension.security_adapter_langchain.violation_handler import ToolViolationHandler, ViolationResolution
 
 
 class TestSecureRunnableGuard(unittest.TestCase):

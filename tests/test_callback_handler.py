@@ -1,8 +1,8 @@
 import unittest
-from security_core.identity import SecurityIdentity
-from security_core.pdp import EmbeddedPolicyEngine
-from security_core.exceptions import ToolExecutionDeniedError
-from security_adapter_langchain.callback_handler import SecureCallbackHandler
+from langchain_security_extension.security_core.identity import SecurityIdentity
+from langchain_security_extension.security_core.pdp import EmbeddedPolicyEngine
+from langchain_security_extension.security_core.exceptions import ToolExecutionDeniedError
+from langchain_security_extension.security_adapter_langchain.callback_handler import SecureCallbackHandler
 
 
 class TestCallbackHandler(unittest.TestCase):

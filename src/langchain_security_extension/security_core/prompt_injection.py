@@ -6,13 +6,12 @@ as specified in Spec 5.
 """
 
 import re
-from typing import Dict, Any, List, Optional, Tuple
-from security_core.audit import AuditManager, AuditEvent
-from security_core.constants import (
+from typing import Dict, Any, Optional
+from langchain_security_extension.security_core.audit import AuditManager, AuditEvent
+from langchain_security_extension.security_core.constants import (
     EVENT_PROMPT_INJECTION_DETECTED,
     EVENT_INSTRUCTION_OVERRIDE_ATTEMPT,
     PEP_AGENT_GUARD,
-    PEP_TOOL_INTERCEPTOR,
     SEVERITY_CRITICAL_ALERT,
     SEVERITY_SECURITY_ALERT,
     STRATEGY_HARD_ABORT,

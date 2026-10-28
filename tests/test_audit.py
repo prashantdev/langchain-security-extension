@@ -1,6 +1,6 @@
 import unittest
-from security_core.audit import AuditEvent, AuditManager
-from security_core.constants import AUDIT_SEVERITY_INFO, DECISION_PERMIT
+from langchain_security_extension.security_core.audit import AuditEvent, AuditManager
+from langchain_security_extension.security_core.constants import AUDIT_SEVERITY_INFO, DECISION_PERMIT
 from tests.audit_test_collector import TestAuditCollector
 
 

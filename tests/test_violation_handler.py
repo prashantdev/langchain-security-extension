@@ -4,16 +4,16 @@ Unit tests for ToolViolationHandler, RetryBudgetTracker, AbuseThrottleTracker, a
 
 import time
 import unittest
-from security_core.identity import SecurityIdentity, IdentityBridge
-from security_core.pdp import EmbeddedPolicyEngine
-from security_core.audit import AuditManager
+from langchain_security_extension.security_core.identity import SecurityIdentity, IdentityBridge
+from langchain_security_extension.security_core.pdp import EmbeddedPolicyEngine
+from langchain_security_extension.security_core.audit import AuditManager
 from tests.audit_test_collector import TestAuditCollector
-from security_core.exceptions import ToolExecutionDeniedError
-from security_core.constants import (
+from langchain_security_extension.security_core.exceptions import ToolExecutionDeniedError
+from langchain_security_extension.security_core.constants import (
     EVENT_POLICY_BRUTE_FORCE_DETECTED,
     EVENT_POLICY_BRUTE_FORCE_SCANNING,
 )
-from security_adapter_langchain.violation_handler import (
+from langchain_security_extension.security_adapter_langchain.violation_handler import (
     ToolViolationHandler,
     RetryBudgetTracker,
     AbuseThrottleTracker,

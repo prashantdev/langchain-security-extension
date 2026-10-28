@@ -3,8 +3,8 @@ Unit tests for CEL string helper bindings and EntityAttributeResolverSPI integra
 """
 
 import unittest
-from security_core.identity import SecurityIdentity
-from security_core.cel_evaluator import CELEvaluator, EntityAttributeResolverSPI
+from langchain_security_extension.security_core.identity import SecurityIdentity
+from langchain_security_extension.security_core.cel_evaluator import CELEvaluator, EntityAttributeResolverSPI
 
 
 class MockServerResolver(EntityAttributeResolverSPI):

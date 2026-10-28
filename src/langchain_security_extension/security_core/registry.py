@@ -6,8 +6,8 @@ Resolvers without coupling the library to host application packages.
 """
 
 from typing import Optional
-from security_core.pdp import PolicyDecisionEngine
-from security_core.cel_evaluator import EntityAttributeResolverSPI
+from langchain_security_extension.security_core.pdp import PolicyDecisionEngine
+from langchain_security_extension.security_core.cel_evaluator import EntityAttributeResolverSPI
 
 
 class SecurityRegistry:

@@ -3,7 +3,7 @@ Test-only audit collector fixture for testing audit event pipelines.
 """
 
 from typing import List
-from security_core.audit import AuditEvent, AuditPublisherSPI
+from langchain_security_extension.security_core.audit import AuditEvent, AuditPublisherSPI
 
 
 class TestAuditCollector(AuditPublisherSPI):

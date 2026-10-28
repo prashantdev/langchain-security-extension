@@ -10,10 +10,10 @@ import json
 import time
 from enum import Enum
 from typing import Dict, List, Set, Any, Optional
-from security_core.identity import SecurityIdentity
-from security_core.cel_evaluator import CELEvaluator
-from security_core.audit import AuditManager, AuditEvent
-from security_core.constants import (
+from langchain_security_extension.security_core.identity import SecurityIdentity
+from langchain_security_extension.security_core.cel_evaluator import CELEvaluator
+from langchain_security_extension.security_core.audit import AuditManager, AuditEvent
+from langchain_security_extension.security_core.constants import (
     DECISION_PERMIT,
     DECISION_DENY,
     DECISION_NOT_APPLICABLE,

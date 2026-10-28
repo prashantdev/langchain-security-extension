@@ -5,10 +5,10 @@ Re-exports integration components including `@secured_tool`, `SecureRunnable`,
 `SecureRetriever`, `SecureCallbackHandler`, `DocumentSecurityTransformer`, and `LangGraphNodeGuard`.
 """
 
-from security_adapter_langchain.callback_handler import SecureCallbackHandler
-from security_adapter_langchain.tool_decorator import secured_tool, SecuredToolConfig, get_tool_schema
-from security_adapter_langchain.retriever_wrapper import SecureRetriever, SecureDocument
-from security_adapter_langchain.ingestion import (
+from langchain_security_extension.security_adapter_langchain.callback_handler import SecureCallbackHandler
+from langchain_security_extension.security_adapter_langchain.tool_decorator import secured_tool, SecuredToolConfig, get_tool_schema
+from langchain_security_extension.security_adapter_langchain.retriever_wrapper import SecureRetriever, SecureDocument
+from langchain_security_extension.security_adapter_langchain.ingestion import (
     DocumentSecurityTransformer,
     SecureDocumentChunkEnricher,
     SecureEnvelopeValidator,
@@ -20,12 +20,12 @@ from security_adapter_langchain.ingestion import (
     HeadingClassificationEnricher,
     DlpSecretDetectionEnricher,
 )
-from security_adapter_langchain.runnable_guard import SecureRunnable
-from security_adapter_langchain.langgraph_integration import (
+from langchain_security_extension.security_adapter_langchain.runnable_guard import SecureRunnable
+from langchain_security_extension.security_adapter_langchain.langgraph_integration import (
     SecuredAgentState,
     LangGraphNodeGuard,
 )
-from security_adapter_langchain.violation_handler import (
+from langchain_security_extension.security_adapter_langchain.violation_handler import (
     ToolViolationHandler,
     RetryBudgetTracker,
     AbuseThrottleTracker,

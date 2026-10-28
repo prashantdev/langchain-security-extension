@@ -3,7 +3,7 @@ Comprehensive unit tests for Secure Ingestion Pipeline (Stage 3 Enricher, SPI, H
 """
 
 import unittest
-from security_adapter_langchain.ingestion import (
+from langchain_security_extension.security_adapter_langchain.ingestion import (
     DocumentSecurityTransformer,
     SecureDocumentChunkEnricher,
     SecurityEnvelopeValidator,
@@ -13,8 +13,8 @@ from security_adapter_langchain.ingestion import (
     ChunkEnrichmentContext,
     compute_envelope_hmac,
 )
-from security_core.exceptions import IngestionRejectedException
-from security_core.constants import (
+from langchain_security_extension.security_core.exceptions import IngestionRejectedException
+from langchain_security_extension.security_core.constants import (
     CLASSIFICATION_PUBLIC,
     CLASSIFICATION_RESTRICTED,
     INGEST_MODE_STRICT_FAIL_CLOSED,
@@ -119,9 +119,9 @@ class TestSecureIngestionPipeline(unittest.TestCase):
         self.assertFalse(validator.validate_metadata(tampered_meta))
 
     def test_ingestion_audit_events(self):
-        from security_core.audit import AuditManager
+        from langchain_security_extension.security_core.audit import AuditManager
         from tests.audit_test_collector import TestAuditCollector
-        from security_core.constants import EVENT_INGEST_CHUNK_REJECTED
+        from langchain_security_extension.security_core.constants import EVENT_INGEST_CHUNK_REJECTED
         logger = TestAuditCollector.create()
         audit_mgr = AuditManager.create(publishers=[logger])
         transformer = DocumentSecurityTransformer()
@@ -177,7 +177,7 @@ class TestSecureIngestionPipeline(unittest.TestCase):
             self.assertEqual(chunk_doc.metadata["sec:classification_level"], "INTERNAL")
 
     def test_secure_vector_store_ingestor_executes_splitter_between_stage1_and_stage3(self):
-        from security_core.constants import SEC_CHUNK_INDEX, SEC_CLASSIFICATION_LEVEL
+        from langchain_security_extension.security_core.constants import SEC_CHUNK_INDEX, SEC_CLASSIFICATION_LEVEL
         transformer = DocumentSecurityTransformer(
             default_classification=CLASSIFICATION_PUBLIC,
             default_roles=["ROLE_USER"],

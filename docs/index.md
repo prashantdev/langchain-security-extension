@@ -28,8 +28,9 @@ This documentation portal provides architectural blueprints, step-by-step rollou
 Protect tool calls with Common Expression Language (CEL) argument constraints, caller role checks, and numeric clearance levels. Identity context propagates deterministically in-band via LangChain's native `RunnableConfig` without prompt overhead:
 
 ```python
-from security_adapter_langchain import secured_tool
-from security_core import IdentityBridge, SecurityIdentity, ToolExecutionDeniedError
+from langchain_security_extension.security_adapter_langchain import secured_tool
+from langchain_security_extension.security_core import IdentityBridge, SecurityIdentity, ToolExecutionDeniedError
+
 
 # 1. Protect any tool with deterministic CEL argument constraints
 @secured_tool(
@@ -41,11 +42,13 @@ from security_core import IdentityBridge, SecurityIdentity, ToolExecutionDeniedE
 def example_tool_op_reboot_server(server: str) -> str:
     return f"Rebooted {server}"
 
+
 # Helper: attach identity to LangChain RunnableConfig
 def caller(dept: str):
     return IdentityBridge.create_runnable_config(
         SecurityIdentity.create("alice", "CORP", {"DEVOPS"}, 1, dept)
     )
+
 
 # 2. Authorized caller (DEVOPS + INFRA) -> PERMIT
 print(example_tool_op_reboot_server("prod-db-01", config=caller("INFRA")))

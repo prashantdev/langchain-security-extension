@@ -6,7 +6,6 @@ publisher SPI implementations, and non-blocking ring buffer audit dispatch as sp
 """
 
 import os
-import re
 import json
 import time
 import uuid
@@ -15,19 +14,14 @@ import threading
 from collections import deque
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
-from security_core.constants import (
+from langchain_security_extension.security_core.constants import (
     DEFAULT_SCHEMA_VERSION,
     DEFAULT_RING_BUFFER_CAPACITY,
     DEFAULT_PAYLOAD_MAX_CHARS,
-    SEVERITY_INFORMATIONAL,
-    SEVERITY_WARNING,
-    SEVERITY_SECURITY_ALERT,
-    SEVERITY_CRITICAL_ALERT,
     DEFAULT_SENSITIVE_FIELD_NAMES,
 )
-from security_core.pii import (
+from langchain_security_extension.security_core.pii import (
     PiiContext,
-    PiiSanitizerSPI,
     BuiltInPiiSanitizer,
     get_pii_sanitizer,
     get_pii_scope,

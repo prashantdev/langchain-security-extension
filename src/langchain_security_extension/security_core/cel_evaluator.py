@@ -8,7 +8,7 @@ as specified in Spec 2 and Spec 4.
 import ast
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
-from security_core.identity import SecurityIdentity
+from langchain_security_extension.security_core.identity import SecurityIdentity
 
 
 class EntityAttributeResolverSPI(ABC):
@@ -28,7 +28,7 @@ class EntityAttributeResolverSPI(ABC):
         pass
 
 
-from security_core.constants import CONFIG_KEY_ENTITY_CACHE, REASON_FAIL_CLOSED_NULL_ENTITY
+from langchain_security_extension.security_core.constants import CONFIG_KEY_ENTITY_CACHE, REASON_FAIL_CLOSED_NULL_ENTITY
 
 DEFAULT_ENTITY_RESOLVER: Optional[EntityAttributeResolverSPI] = None
 DIAGNOSTIC_FAIL_CLOSED_NULL_ENTITY: str = f"{REASON_FAIL_CLOSED_NULL_ENTITY} (Unresolvable entity attributes)"

@@ -1,17 +1,13 @@
 import unittest
-from security_core.identity import SecurityIdentity
-from security_core.pdp import (
+from langchain_security_extension.security_core.identity import SecurityIdentity
+from langchain_security_extension.security_core.pdp import (
     EmbeddedPolicyEngine,
     PolicyEvaluationRequest,
     RoleGraph,
 )
-from security_core.constants import (
-    DECISION_PERMIT,
-    DECISION_DENY,
+from langchain_security_extension.security_core.constants import (
     REASON_TENANT_MISMATCH,
     REASON_INSUFFICIENT_CLEARANCE,
-    REASON_MISSING_REQUIRED_ROLE,
-    REASON_PARAMETER_CONSTRAINT_FAILED,
 )
 
 

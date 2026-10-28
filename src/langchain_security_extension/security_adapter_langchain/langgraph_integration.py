@@ -5,12 +5,12 @@ Provides in-band security envelope propagation across stateful graph nodes
 as specified in Spec 0 and Spec 4.
 """
 
-from typing import Dict, Any, Sequence, Annotated, Callable
+from typing import Dict, Any, Sequence, Callable
 from typing_extensions import TypedDict
-from security_core.identity import SecurityIdentity, InvocationParameters
-from security_core.pdp import PolicyDecisionEngine, PolicyEvaluationRequest
-from security_core.constants import SECURITY_INVOCATION_PARAMS_KEY, ACTION_AGENT_INVOKE
-from security_core.exceptions import SecurityAuthorizationError
+from langchain_security_extension.security_core.identity import InvocationParameters
+from langchain_security_extension.security_core.pdp import PolicyDecisionEngine, PolicyEvaluationRequest
+from langchain_security_extension.security_core.constants import SECURITY_INVOCATION_PARAMS_KEY, ACTION_AGENT_INVOKE
+from langchain_security_extension.security_core.exceptions import SecurityAuthorizationError
 
 
 class SecuredAgentState(TypedDict):

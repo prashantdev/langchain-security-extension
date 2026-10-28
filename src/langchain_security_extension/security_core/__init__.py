@@ -5,13 +5,13 @@ Re-exports core primitives including SecurityIdentity, PolicyDecisionEngine,
 AuditManager, CELEvaluator, and exception classes for zero-trust LLM security architecture.
 """
 
-from security_core.identity import (
+from langchain_security_extension.security_core.identity import (
     SecurityIdentity,
     InvocationParameters,
     IdentityBridge,
     SecurityContextHolder,
 )
-from security_core.pdp import (
+from langchain_security_extension.security_core.pdp import (
     PolicyEvaluationRequest,
     PolicyDecision,
     PolicyDecisionEngine,
@@ -20,12 +20,12 @@ from security_core.pdp import (
     TwoTierDecisionCache,
     PolicyRequest,
 )
-from security_core.cel_evaluator import (
+from langchain_security_extension.security_core.cel_evaluator import (
     CELEvaluator,
     EntityAttributeResolverSPI,
 )
-from security_core.registry import SecurityRegistry
-from security_core.audit import (
+from langchain_security_extension.security_core.registry import SecurityRegistry
+from langchain_security_extension.security_core.audit import (
     AuditEvent,
     AuditManager,
     AuditPublisherSPI,
@@ -34,11 +34,11 @@ from security_core.audit import (
     JsonFileAuditLogger,
     PythonLoggingAuditPublisher,
 )
-from security_core.prompt_injection import (
+from langchain_security_extension.security_core.prompt_injection import (
     PromptInjectionScanner,
     PromptInjectionScanResult,
 )
-from security_core.exceptions import (
+from langchain_security_extension.security_core.exceptions import (
     DiagnosticReasonEnum,
     SecurityAuthorizationError,
     AgentAccessDeniedException,
@@ -48,7 +48,7 @@ from security_core.exceptions import (
     PolicyViolationError,
     SecurityValidationException,
 )
-from security_core.constants import (
+from langchain_security_extension.security_core.constants import (
     DECISION_PERMIT,
     DECISION_DENY,
     ACTION_AGENT_INVOKE,
@@ -57,7 +57,7 @@ from security_core.constants import (
     STRATEGY_HARD_ABORT,
     STRATEGY_RETURN_FEEDBACK,
 )
-from security_core.pii import (
+from langchain_security_extension.security_core.pii import (
     PiiSanitizerSPI,
     BuiltInPiiSanitizer,
     PiiContext,

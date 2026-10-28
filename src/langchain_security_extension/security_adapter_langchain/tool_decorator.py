@@ -7,9 +7,9 @@ clearance floor, and CEL parameter constraint expressions as specified in Spec 2
 
 import functools
 from typing import Callable, List, Dict, Any, Optional
-from security_core.identity import SecurityIdentity, IdentityBridge, SecurityContextHolder
-from security_core.pdp import PolicyDecisionEngine, PolicyEvaluationRequest
-from security_core.constants import (
+from langchain_security_extension.security_core.identity import SecurityIdentity, IdentityBridge
+from langchain_security_extension.security_core.pdp import PolicyDecisionEngine, PolicyEvaluationRequest
+from langchain_security_extension.security_core.constants import (
     ACTION_TOOL_EXECUTE,
     STRATEGY_HARD_ABORT,
     STRATEGY_RETURN_FEEDBACK,
@@ -18,8 +18,8 @@ from security_core.constants import (
     PII_STAGE_TOOL_ARGUMENT,
     PII_STAGE_TOOL_OUTPUT,
 )
-from security_core.exceptions import ToolExecutionDeniedError, ToolExecutionFeedbackException
-from security_core.pii import get_pii_sanitizer, get_pii_scope, PiiContext
+from langchain_security_extension.security_core.exceptions import ToolExecutionDeniedError
+from langchain_security_extension.security_core.pii import get_pii_sanitizer, get_pii_scope, PiiContext
 
 
 
@@ -248,11 +248,11 @@ def secured_tool(
                                 break
 
             if engine is None:
-                from security_core.registry import SecurityRegistry
+                from langchain_security_extension.security_core.registry import SecurityRegistry
                 engine = SecurityRegistry.get_pdp_engine()
 
             if engine is None:
-                from security_core.pdp import EmbeddedPolicyEngine
+                from langchain_security_extension.security_core.pdp import EmbeddedPolicyEngine
                 engine = EmbeddedPolicyEngine.create()
 
             resolved_resolver = entity_resolver
@@ -268,7 +268,7 @@ def secured_tool(
                 resolved_resolver = getattr(engine._cel_evaluator, "entity_resolver", None)
 
             if resolved_resolver is None:
-                from security_core.registry import SecurityRegistry
+                from langchain_security_extension.security_core.registry import SecurityRegistry
                 resolved_resolver = SecurityRegistry.get_entity_resolver()
 
             if resolved_resolver and hasattr(engine, "_cel_evaluator") and engine._cel_evaluator:
@@ -365,8 +365,8 @@ def secured_tool(
                 reason_msg = f"Policy violation: Access denied for tool '{tool_name}' ({decision.diagnostic_reason})"
 
                 if param_escalation_detected and hasattr(engine, "audit_manager") and engine.audit_manager:
-                    from security_core.audit import AuditEvent
-                    from security_core.constants import (
+                    from langchain_security_extension.security_core.audit import AuditEvent
+                    from langchain_security_extension.security_core.constants import (
                         EVENT_PARAMETER_PRIVILEGE_ESCALATION,
                         PEP_TOOL_INTERCEPTOR,
                         SEVERITY_SECURITY_ALERT,
@@ -399,7 +399,7 @@ def secured_tool(
                         caller_identity=caller_identity,
                     )
                 elif isinstance(cfg, dict) and isinstance(cfg.get("configurable"), dict):
-                    from security_adapter_langchain.violation_handler import (
+                    from langchain_security_extension.security_adapter_langchain.violation_handler import (
                         ViolationResolution,
                         STATUS_BLOCKED_BY_POLICY,
                         POLICY_STATUS_BLOCKED,
@@ -430,8 +430,8 @@ def secured_tool(
 
                 if should_hard_abort:
                     if retries > 2 and hasattr(engine, "audit_manager") and engine.audit_manager:
-                        from security_core.audit import AuditEvent
-                        from security_core.constants import (
+                        from langchain_security_extension.security_core.audit import AuditEvent
+                        from langchain_security_extension.security_core.constants import (
                             EVENT_POLICY_BRUTE_FORCE_DETECTED,
                             PEP_TOOL_INTERCEPTOR,
                             SEVERITY_CRITICAL_ALERT,

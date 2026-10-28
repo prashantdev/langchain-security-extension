@@ -8,7 +8,7 @@ and async context propagation holders as specified in Spec 4 and Spec 5.
 from typing import Dict, List, Any, Set, Optional
 import contextvars
 
-from security_core.constants import (
+from langchain_security_extension.security_core.constants import (
     DEFAULT_TENANT_ID,
     DEFAULT_CLEARANCE_LEVEL,
     DEFAULT_DEPARTMENT_ID,
@@ -463,7 +463,7 @@ class IdentityBridge:
         Returns:
             AuditEvent: Constructed and published audit event object.
         """
-        from security_core.audit import AuditEvent
+        from langchain_security_extension.security_core.audit import AuditEvent
         diagnostic_reason = f"Cross-tenant isolation violation: tenantId={tenant_id}"
         metadata = {
             "threat_category": THREAT_CATEGORY_IDENTITY_SPOOFING,
@@ -526,7 +526,7 @@ class IdentityBridge:
         Returns:
             AuditEvent: Constructed and logged audit event.
         """
-        from security_core.audit import AuditEvent
+        from langchain_security_extension.security_core.audit import AuditEvent
         metadata = {
             "department": department,
             "roles": roles,

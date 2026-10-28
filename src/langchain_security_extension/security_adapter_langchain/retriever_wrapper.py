@@ -6,9 +6,9 @@ as specified in Spec 3.
 """
 
 from typing import List, Dict, Any, Optional, Tuple
-from security_core.identity import SecurityIdentity, IdentityBridge
-from security_core.pdp import PolicyDecisionEngine, PolicyEvaluationRequest
-from security_core.constants import (
+from langchain_security_extension.security_core.identity import SecurityIdentity, IdentityBridge
+from langchain_security_extension.security_core.pdp import PolicyDecisionEngine, PolicyEvaluationRequest
+from langchain_security_extension.security_core.constants import (
     ACTION_CHUNK_RETRIEVE,
     DEFAULT_MAX_FETCH_CAP,
     DEFAULT_OVERSAMPLING_FACTOR,
@@ -37,8 +37,8 @@ from security_core.constants import (
     PII_SCOPE_FULL_IN_FLIGHT,
     PII_STAGE_RETRIEVAL_DOCUMENT,
 )
-from security_core.audit import AuditEvent
-from security_core.pii import get_pii_sanitizer, get_pii_scope, PiiContext
+from langchain_security_extension.security_core.audit import AuditEvent
+from langchain_security_extension.security_core.pii import get_pii_sanitizer, get_pii_scope, PiiContext
 
 
 from langchain_core.documents import Document
@@ -353,7 +353,7 @@ class SecureRetriever(BaseRetriever):
 
             # Optional HMAC Signature verification
             if self._secret_key and SEC_ENVELOPE_HASH in metadata:
-                from security_adapter_langchain.ingestion import compute_envelope_hmac
+                from langchain_security_extension.security_adapter_langchain.ingestion import compute_envelope_hmac
                 expected = compute_envelope_hmac(metadata, self._secret_key)
                 if metadata[SEC_ENVELOPE_HASH] != expected:
                     if audit_manager:

@@ -3,9 +3,9 @@ Unit tests for PromptInjectionScanner subsystem and threat auditing.
 """
 
 import unittest
-from security_core.audit import AuditManager
-from security_core.prompt_injection import PromptInjectionScanner
-from security_core.constants import EVENT_PROMPT_INJECTION_DETECTED
+from langchain_security_extension.security_core.audit import AuditManager
+from langchain_security_extension.security_core.prompt_injection import PromptInjectionScanner
+from langchain_security_extension.security_core.constants import EVENT_PROMPT_INJECTION_DETECTED
 from tests.audit_test_collector import TestAuditCollector
 
 

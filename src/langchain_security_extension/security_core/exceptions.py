@@ -8,7 +8,7 @@ as specified in library-specs.
 
 from enum import Enum
 from typing import Optional, Dict, Any
-from security_core.constants import (
+from langchain_security_extension.security_core.constants import (
     REASON_AUTHORIZED,
     REASON_TENANT_MISMATCH,
     REASON_INSUFFICIENT_CLEARANCE,

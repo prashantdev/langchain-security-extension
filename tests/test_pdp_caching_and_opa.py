@@ -3,15 +3,15 @@ Unit tests for Policy Decision Point caching, Deny-Overrides resolution, and OPA
 """
 
 import unittest
-from security_core.identity import SecurityIdentity
-from security_core.pdp import (
+from langchain_security_extension.security_core.identity import SecurityIdentity
+from langchain_security_extension.security_core.pdp import (
     EmbeddedPolicyEngine,
     PolicyRule,
     PolicyEvaluationRequest,
     DecisionEnum,
 )
-from security_core.pdp_opa import RemotePDPAdapter
-from security_core.constants import ACTION_TOOL_EXECUTE, DECISION_DENY, DECISION_PERMIT, STRATEGY_HARD_ABORT
+from langchain_security_extension.security_core.pdp_opa import RemotePDPAdapter
+from langchain_security_extension.security_core.constants import ACTION_TOOL_EXECUTE, DECISION_DENY, DECISION_PERMIT, STRATEGY_HARD_ABORT
 
 
 class TestPDPCachingAndOPA(unittest.TestCase):
@@ -109,9 +109,9 @@ class TestPDPCachingAndOPA(unittest.TestCase):
         self.assertIn("circuit breaker OPEN", d3.diagnostic_reason)
 
     def test_tier1_invocation_cache(self):
-        from security_core.pdp import RoleGraph
-        from security_core.cel_evaluator import CELEvaluator
-        from security_core.audit import AuditManager
+        from langchain_security_extension.security_core.pdp import RoleGraph
+        from langchain_security_extension.security_core.cel_evaluator import CELEvaluator
+        from langchain_security_extension.security_core.audit import AuditManager
         from tests.audit_test_collector import TestAuditCollector
         role_graph = RoleGraph.create()
         cel_eval = CELEvaluator.create()
@@ -153,8 +153,8 @@ class TestPDPCachingAndOPA(unittest.TestCase):
         asyncio.run(run_test())
 
     def test_opa_cache_invalidation_handler(self):
-        from security_core.pdp import TwoTierDecisionCache
-        from security_pdp_opa.opa_adapter import OPACacheInvalidationHandler
+        from langchain_security_extension.security_core.pdp import TwoTierDecisionCache
+        from langchain_security_extension.security_pdp_opa import OPACacheInvalidationHandler
 
         cache = TwoTierDecisionCache.create()
         cache.put_static("k1", None)

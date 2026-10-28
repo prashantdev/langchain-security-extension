@@ -1,8 +1,8 @@
 import unittest
-from security_core.identity import SecurityIdentity
-from security_core.pdp import EmbeddedPolicyEngine
-from security_core.exceptions import ToolExecutionDeniedError
-from security_adapter_langchain.tool_decorator import secured_tool
+from langchain_security_extension.security_core.identity import SecurityIdentity
+from langchain_security_extension.security_core.pdp import EmbeddedPolicyEngine
+from langchain_security_extension.security_core.exceptions import ToolExecutionDeniedError
+from langchain_security_extension.security_adapter_langchain.tool_decorator import secured_tool
 
 
 class TestSecuredToolDecorator(unittest.TestCase):
@@ -83,9 +83,9 @@ class TestSecuredToolDecorator(unittest.TestCase):
         self.assertEqual(res["diagnostic_reason"], "MISSING_REQUIRED_ROLE")
 
     def test_parameter_privilege_escalation_detection(self):
-        from security_core.audit import AuditManager
+        from langchain_security_extension.security_core.audit import AuditManager
         from tests.audit_test_collector import TestAuditCollector
-        from security_core.constants import EVENT_PARAMETER_PRIVILEGE_ESCALATION
+        from langchain_security_extension.security_core.constants import EVENT_PARAMETER_PRIVILEGE_ESCALATION
 
         logger = TestAuditCollector.create()
         audit_mgr = AuditManager.create(publishers=[logger])
@@ -121,7 +121,7 @@ class TestSecuredToolDecorator(unittest.TestCase):
 
     def test_security_identity_and_config_injection_and_schema_concealment(self):
         import inspect
-        from security_adapter_langchain.tool_decorator import get_tool_schema
+        from langchain_security_extension.security_adapter_langchain.tool_decorator import get_tool_schema
 
         pdp = EmbeddedPolicyEngine.create()
         subject = SecurityIdentity.create(
