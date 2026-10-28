@@ -1,7 +1,8 @@
 # LangChain Security Extension
 
 [![Python Versions](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://pypi.org/project/langchain-security-extension/)
-[![Documentation](https://img.shields.io/badge/docs-Implementation%20Guide-blue.svg)](https://prashantdev.github.io/langchain-security-extension/)
+[![Documentation](https://img.shields.io/badge/docs-Documentation%20Hub-blue.svg)](https://prashantdev.github.io/langchain-security-extension/)
+[![Implementation Guide](https://img.shields.io/badge/docs-Implementation%20Guide-orange.svg)](https://prashantdev.github.io/langchain-security-extension/guides/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/prashantdev/langchain-security-extension/actions)
 [![Zero-Dependency Core](https://img.shields.io/badge/core%20deps-zero%20dependencies-success.svg)](src/security_core)
@@ -9,7 +10,7 @@
 
 > **Quick Intro:** This library provides deterministic, code-level Policy Enforcement Points (PEPs) for LangChain and LangGraph agents—shifting organizations from fragile, prompt-dependent guardrails to deterministic, enterprise-grade governance.
 >
-> 📖 **[Read the Enterprise Implementation Guide](https://prashantdev.github.io/langchain-security-extension/)** for step-by-step architecture patterns, policy authoring, and production rollout instructions.
+> 📖 **[Read the Enterprise Implementation Guide](https://prashantdev.github.io/langchain-security-extension/guides/)** for step-by-step architecture patterns, policy authoring, and production rollout instructions, or browse the **[Documentation Hub](https://prashantdev.github.io/langchain-security-extension/)**.
 
 ### ✨ Strategic Advantages
 
@@ -255,14 +256,20 @@ sequenceDiagram
 
 ---
 
-## 📖 Enterprise Implementation Guide & Reference App
+## 📖 Documentation & Reference Application
 
 Ready to adopt `langchain-security-extension` in your organization?
 
-1. 📘 **[Enterprise Implementation Guide](https://prashantdev.github.io/langchain-security-extension/)**  
-   The complete guide to rolling out deterministic security in production—covering Identity Provider (IdP) wiring, CEL & OPA policy authoring, RAG metadata signing, DLP sanitization, and SIEM telemetry.
+1. 🌐 **[Documentation Hub](https://prashantdev.github.io/langchain-security-extension/)**  
+   The central documentation portal covering architecture overviews, zero-trust patterns, and library index.
 
-2. 🧪 **[Companion Reference Application: Enterprise IT Incident Assistant](https://github.com/prashantdev/langchain-enterprise-incident-assistant)**  
+2. 📘 **[Enterprise Implementation Guide](https://prashantdev.github.io/langchain-security-extension/guides/)**  
+   The complete 12-chapter guide to rolling out deterministic security in production—covering Identity Provider (IdP) wiring, CEL & OPA policy authoring, RAG metadata signing, DLP sanitization, and SIEM telemetry.
+
+3. 📚 **[API Reference](docs/api/modules.rst)**  
+   Detailed module specifications for `security_core`, `security_adapter_langchain`, and `security_pdp_opa`.
+
+4. 🧪 **[Companion Reference Application: Enterprise IT Incident Assistant](https://github.com/prashantdev/langchain-enterprise-incident-assistant)**  
    The live demonstrator codebase used throughout the implementation guide to illustrate a real-world migration from fragile prompt guardrails to deterministic enforcement:
    - **Unhardened baseline (`master` branch):** Demonstrates real prompt injection vulnerabilities, bypassing standard LLM system prompts and causing unauthorized tool calls.
    - **Hardened implementation (`secured3` branch):** Shows the complete, production-grade integration of `langchain-security-extension` following the implementation guide.
