@@ -51,16 +51,16 @@
 
 <p>An Abstract Syntax Tree (AST: a hierarchical tree representation of structural code or query expressions) dynamically compiles the caller's identity claims into the vector store's native dialect. This offloads coarse access control directly to the database engine:</p>
 
-<p><strong>security_adapter_langchain/retriever_wrapper.py</strong></p>
+<p><strong>langchain_security_extension/security_adapter_langchain/retriever_wrapper.py</strong></p>
 <div class="code-block-container code-block-library">
   <div class="code-block-header">
     <div class="code-block-title">
       <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-      <span class="code-filename">security_adapter_langchain/retriever_wrapper.py</span>
+      <span class="code-filename">langchain_security_extension/security_adapter_langchain/retriever_wrapper.py</span>
     </div>
     <span class="code-lang">PYTHON</span>
   </div>
-  <pre><code class="language-python"># security_adapter_langchain/retriever_wrapper.py
+  <pre><code class="language-python"># langchain_security_extension/security_adapter_langchain/retriever_wrapper.py
 def build_full_ast(self, identity: Optional[SecurityIdentity]) -> PrefilterAST:
     """Constructs unconstrained full pre-filter AST from caller SecurityIdentity."""
     if identity is None or identity.is_anonymous or identity.subject_id is None or str(identity.subject_id).upper() == ANONYMOUS_SUBJECT_ID:
@@ -92,6 +92,10 @@ def build_full_ast(self, identity: Optional[SecurityIdentity]) -> PrefilterAST:
 <p>If post-retrieval pruning still leaves fewer than K_target chunks, the retriever executes adaptive secondary paging up to a bounded threshold (default: 2 attempts). To prevent irrelevant documents from being injected simply to satisfy K_target, candidate oversampling and secondary paging enforce a configurable similarity score cutoff floor (<code>similarity_cutoff</code>, default: <code>0.0</code>), discarding any candidate whose similarity score falls below the relevance floor.</p>
 
 <p>Post-retrieval verification also serves as an active in-flight PII enforcement point: when full in-flight sanitization is enabled, retrieved document chunks are intercepted at stage <code>PII_STAGE_RETRIEVAL_DOCUMENT</code> and redacted before entering model prompt context (see <a href="9.%20Sanitizing%20Sensitive%20Payloads.html">Chapter 9: Sanitizing Sensitive Payloads</a> for detailed redaction policies).</p>
+
+<h3>Restricted Title Pruning & Telemetry Redaction</h3>
+
+<p>When candidate documents are discarded during post-retrieval clearance evaluation, <code>SecureRetriever</code> records the title/header of each unauthorized document into <code>config["configurable"]["sec:pruned_doc_titles"]</code>. Downstream agent telemetry finalizers (such as <code>finalize_telemetry()</code> in <code>app/agents/guardrail_tests_telemetry_helper.py</code>) inspect this list to redact restricted document names from user responses and logs with <code>[REDACTED_RESTRICTED_DOC]</code>, preventing indirect data leakage via document titles.</p>
 
 <h3>Auditing and Telemetry Events</h3>
 
@@ -190,7 +194,7 @@ def build_full_ast(self, identity: Optional[SecurityIdentity]) -> PrefilterAST:
      def search(self, query: str, *args: Any, **kwargs: Any) -> List[TextSegment]:
 +        run_config: Optional[Dict[str, Any]] = args[1] if len(args) > 1 else kwargs.get("config")
 +        if run_config is None:
-+            from security_core.identity import IdentityBridge
++            from langchain_security_extension.security_core.identity import IdentityBridge
 +            resolved_identity = IdentityBridge.resolve_identity(kwargs.get("identity"))
 +            run_config = IdentityBridge.create_runnable_config(resolved_identity)
 +

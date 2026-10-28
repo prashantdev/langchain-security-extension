@@ -91,18 +91,18 @@
 
 <h2>The Service Provider Interface (SPI) Architecture</h2>
 
-<p>The sanitization subsystem is decoupled into a dedicated module <code>security_core.pii</code>. By adopting a Service Provider Interface (SPI), the library establishes a <strong>single point of sanitization</strong> across the application lifecycle: implementors plug in their custom or enterprise DLP solution in one centralized location, and the framework automatically coordinates scrubbing across all execution entry points, tool invocations, RAG retrievers, and audit publishers. Implementors can inspect the active scope and swap the active provider dynamically:</p>
+<p>The sanitization subsystem is decoupled into a dedicated module <code>langchain_security_extension.security_core.pii</code>. By adopting a Service Provider Interface (SPI), the library establishes a <strong>single point of sanitization</strong> across the application lifecycle: implementors plug in their custom or enterprise DLP solution in one centralized location, and the framework automatically coordinates scrubbing across all execution entry points, tool invocations, RAG retrievers, and audit publishers. Implementors can inspect the active scope and swap the active provider dynamically:</p>
 
-<p>File<br /><strong>security_core/pii.py</strong></p>
+<p>File<br /><strong>langchain_security_extension/security_core/pii.py</strong></p>
 <div class="code-block-container code-block-library">
   <div class="code-block-header">
     <div class="code-block-title">
       <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-      <span class="code-filename">security_core/pii.py</span>
+      <span class="code-filename">langchain_security_extension/security_core/pii.py</span>
     </div>
     <span class="code-lang">PYTHON</span>
   </div>
-  <pre><code class="language-python"># security_core/pii.py
+  <pre><code class="language-python"># langchain_security_extension/security_core/pii.py
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Set
 
@@ -359,12 +359,12 @@ def reset_pdp_engine() -> None:
 
 <p>The library's <code>AuditManager</code> automatically executes the active PII sanitization pipeline on all diagnostic messages and dictionary payloads prior to queueing and dispatching events to registered publishers:</p>
 
-<p><strong>security_core/audit.py</strong></p>
+<p><strong>langchain_security_extension/security_core/audit.py</strong></p>
 <div class="code-block-container code-block-library">
   <div class="code-block-header">
     <div class="code-block-title">
       <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-      <span class="code-filename">security_core/audit.py</span>
+      <span class="code-filename">langchain_security_extension/security_core/audit.py</span>
     </div>
     <span class="code-lang">PYTHON</span>
   </div>

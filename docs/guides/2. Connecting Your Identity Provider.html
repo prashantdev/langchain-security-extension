@@ -66,12 +66,12 @@
 
 <p>Caller identity is consolidated into an immutable data structure before reaching any LangChain component:</p>
 
-<p><strong>security_core/identity.py</strong></p>
+<p><strong>langchain_security_extension/security_core/identity.py</strong></p>
 <div class="code-block-container code-block-library">
   <div class="code-block-header">
     <div class="code-block-title">
       <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-      <span class="code-filename">security_core/identity.py</span>
+      <span class="code-filename">langchain_security_extension/security_core/identity.py</span>
     </div>
     <span class="code-lang">PYTHON</span>
   </div>
@@ -156,7 +156,7 @@
 -                for item in raw_roles:
 -                    if isinstance(item, str):
 -                        roles.extend([r.strip() for r in item.split(",") if r.strip()])
-+            from security_core.identity import IdentityBridge
++            from langchain_security_extension.security_core.identity import IdentityBridge
 +            from app.security.security_integration import CLEARANCE_RANK_MAP
 +
 +            default_rank = CLEARANCE_RANK_MAP.get(CLEARANCE_UNAUTHENTICATED, 0)

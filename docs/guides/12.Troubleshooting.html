@@ -123,7 +123,7 @@
       <div class="code-block-header">
         <div class="code-block-title">
           <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-          <span class="code-filename">security_core/identity.py</span>
+          <span class="code-filename">langchain_security_extension/security_core/identity.py</span>
         </div>
         <span class="code-lang">PYTHON</span>
       </div>
@@ -142,9 +142,10 @@ remediation_agent.invoke(inputs, config=run_config)</code></pre>
 <p>The application abruptly halts all tool and agent executions with fail-closed rejections, even for privileged administrators.</p>
 
 <ul>
-  <li><strong>Root Cause:</strong> When <code>security.pdp.mode=OPA</code> is enabled, remote HTTP latency spikes exceeding <code>security.pdp.opa.timeout</code> (default: 50ms) cause repeated evaluation timeouts, tripping the circuit breaker threshold.</li>
+  <li><strong>Root Cause:</strong> When <code>security.pdp.mode=OPA</code> is enabled, remote HTTP latency spikes exceeding <code>security.pdp.opa.timeout</code> (default: 50ms) cause repeated evaluation timeouts, tripping the circuit breaker threshold. When tripped to <code>OPEN</code>, the adapter marks <code>sec:circuit_breaker_state = "OPEN"</code> in request configuration and appends <code>[EVENT_CIRCUIT_BREAKER_OPEN | EVENT_CIRCUIT_BREAKER_TRANSITION | LOCAL_PDP_FALLBACK]</code> to diagnostic reasons, enforcing fail-closed rejection.</li>
   <li><strong>Enterprise Best Practice:</strong>
     <ul>
+      <li><strong>Structured Error Classification:</strong> Catch <code>sec:circuit_breaker_state == "OPEN"</code> or circuit breaker diagnostic markers in the agent telemetry helper to return specialized status <code>BLOCKED_CIRCUIT_BREAKER</code> with HTTP 403 instead of generic 500 server crashes.</li>
       <li><strong>Enable Local Safety Fallback:</strong> Configure the remote adapter with <code>fallback_engine=base_engine</code>. When the remote OPA cluster is partitioned, the adapter safely falls back to local in-process RBAC/CEL rules rather than halting business operations.</li>
       <li><strong>Tune Thresholds:</strong> For distributed clusters, set <code>security.pdp.circuitbreaker.threshold=3</code> and increase timeout to <code>0.1</code> (100ms) to accommodate temporary network jitter.</li>
     </ul>

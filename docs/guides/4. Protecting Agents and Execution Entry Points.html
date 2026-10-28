@@ -64,12 +64,12 @@
 
 <p>The library implements this lifecycle by wrapping the target runnable in an inline evaluation gate that manages ambient context and policy enforcement:</p>
 
-<p><strong>security_adapter_langchain/runnable_guard.py</strong></p>
+<p><strong>langchain_security_extension/security_adapter_langchain/runnable_guard.py</strong></p>
 <div class="code-block-container code-block-library">
   <div class="code-block-header">
     <div class="code-block-title">
       <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-      <span class="code-filename">security_adapter_langchain/runnable_guard.py</span>
+      <span class="code-filename">langchain_security_extension/security_adapter_langchain/runnable_guard.py</span>
     </div>
     <span class="code-lang">PYTHON</span>
   </div>
@@ -184,10 +184,24 @@
 +    except AgentAccessDeniedException as exc:
 +        logger.warning(f"Triage entry access denied: {exc}")
 +        return build_entry_access_denied_report(request, exc, response, "BLOCKED")
+@@ -87,7 +92,12 @@ def submit_ticket(
+     # Notification Dispatch
+     notification_service_instance.emit_resolution_notification(report)
+ 
+-    if report.stageResults and report.stageResults.get("remediation_security") in ("BLOCKED_POLICY", "BLOCKED_TENANT", "BLOCKED"):
++    if report.stageResults and report.stageResults.get("remediation_security") in (
++        "BLOCKED_POLICY",
++        "BLOCKED_TENANT",
++        "BLOCKED",
++        "BLOCKED_CIRCUIT_BREAKER",
++    ):
++        if response:
++            response.status_code = status.HTTP_403_FORBIDDEN
++        return report
 </code></pre>
 </div>
 
-<p><em>Explanation:</em> Unauthorized callers are rejected at the route handler with HTTP 403 Forbidden without reaching the LLM.</p>
+<p><em>Explanation:</em> Where possible, execution of the agent LLM call is blocked upfront at the entry PEP (e.g., for unauthorized roles or tenant mismatches), terminating the request with zero model token spend. Whatever slips past entry checks because it requires runtime evaluation is blocked downstream before the tool call executes, ensuring critical mutative operations cannot run without authority. The resolution notification is dispatched for full audit traceability, and the endpoint halts with HTTP 403 Forbidden.</p>
 
 <hr />
 

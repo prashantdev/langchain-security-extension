@@ -36,7 +36,7 @@
 
 <p>In this chapter, we use the incident response assistant (<code>langchain-enterprise-incident-assistant</code>) as a concrete demonstrator to show how to connect your enterprise LLM applications to SIEM platforms (such as Splunk, Elastic, or OpenTelemetry collectors) using <code>langchain-security-extension</code>. We examine how to configure <code>AuditManager</code> as a unified telemetry bus, extract and propagate W3C distributed trace headers, and ensure non-blocking, tamper-evident audit event dispatch.</p>
 
-<p>A central architectural advantage of the <code>security_core</code> design is providing a <strong>single, unified entry point</strong> (<code>AuditManager</code> backed by the <code>AuditPublisherSPI</code> interface) for connecting external aggregators. Rather than requiring individual Policy Enforcement Points (PEPs)—such as <code>@secured_tool</code>, <code>SecureRunnable</code>, <code>SecureRetriever</code>, or ingestion validators—to maintain independent logging logic and network connectors, all PEPs dispatch standardized security events to <code>AuditManager</code>. As a result, attaching, swapping, or multiplexing external log aggregators requires configuring publishers in a single location, keeping agent code clean and completely decoupled from observability infrastructure.</p>
+<p>A central architectural advantage of the <code>langchain_security_extension.security_core</code> design is providing a <strong>single, unified entry point</strong> (<code>AuditManager</code> backed by the <code>AuditPublisherSPI</code> interface) for connecting external aggregators. Rather than requiring individual Policy Enforcement Points (PEPs)—such as <code>@secured_tool</code>, <code>SecureRunnable</code>, <code>SecureRetriever</code>, or ingestion validators—to maintain independent logging logic and network connectors, all PEPs dispatch standardized security events to <code>AuditManager</code>. As a result, attaching, swapping, or multiplexing external log aggregators requires configuring publishers in a single location, keeping agent code clean and completely decoupled from observability infrastructure.</p>
 
 <p>While the security library (<code>langchain-security-extension</code>) provides ready-to-use SPI publishers for enterprise platforms (including <code>SplunkHecPublisher</code>, <code>ElasticCommonSchemaPublisher</code>, and <code>OpenTelemetryLogsPublisher</code>), the demonstrator application (<code>langchain-enterprise-incident-assistant</code>) configures local JSON log forwarding (<code>JsonFileAuditLogger</code>) as its primary operational sink (the standard pattern for containerized nodes where agents like Fluentbit or Vector tail log volumes), with externalized settings to optionally enable <code>SplunkHecPublisher</code> directly when HEC credentials are supplied.</p>
 
@@ -94,18 +94,18 @@
 
 <p>Decoupling log export from agent inference relies on the <code>AuditPublisherSPI</code> interface and the central <code>AuditManager</code>. Rather than blocking the model execution thread or relying on fragile asynchronous event-loop primitives, <code>AuditManager</code> dispatches events to a thread-safe bounded deque (ring buffer) monitored by a dedicated background daemon worker thread (<code>AuditManagerAsyncWorker</code>). If the downstream SIEM becomes slow or temporarily unreachable, <code>AuditManager</code> sheds load using <code>DROP_OLDEST_WITH_METRIC</code>, incrementing <code>dropped_count</code> while preserving system responsiveness.</p>
 
-<p><strong>security_core/audit.py</strong></p>
+<p><strong>langchain_security_extension/security_core/audit.py</strong></p>
 <p><strong>Part 1: The Service Provider Interface (AuditPublisherSPI)</strong></p>
 <p>The <code>AuditPublisherSPI</code> defines the contract for streaming structured security events to downstream SIEM and aggregation platforms. Implementors can build custom publishers for internal logging backends or use the library's built-in connectors:</p>
 <div class="code-block-container code-block-library">
   <div class="code-block-header">
     <div class="code-block-title">
       <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-      <span class="code-filename">security_core/audit.py</span>
+      <span class="code-filename">langchain_security_extension/security_core/audit.py</span>
     </div>
     <span class="code-lang">PYTHON</span>
   </div>
-  <pre><code class="language-python"># security_core/audit.py (Pluggable SIEM Publisher SPI)
+  <pre><code class="language-python"># langchain_security_extension/security_core/audit.py (Pluggable SIEM Publisher SPI)
 from abc import ABC, abstractmethod
 
 class AuditPublisherSPI(ABC):
@@ -129,11 +129,11 @@ class AuditPublisherSPI(ABC):
   <div class="code-block-header">
     <div class="code-block-title">
       <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-      <span class="code-filename">security_core/audit.py</span>
+      <span class="code-filename">langchain_security_extension/security_core/audit.py</span>
     </div>
     <span class="code-lang">PYTHON</span>
   </div>
-  <pre><code class="language-python"># security_core/audit.py (Ring Buffer Asynchronous Dispatch)
+  <pre><code class="language-python"># langchain_security_extension/security_core/audit.py (Ring Buffer Asynchronous Dispatch)
 from collections import deque
 import threading
 
@@ -457,7 +457,7 @@ class AuditManager:
      build_entry_access_denied_report,
  )
 +from app.security.security_integration import security_identity_from_context
-+from security_core.identity import IdentityBridge
++from langchain_security_extension.security_core.identity import IdentityBridge
  
 @@ -48,15 +50,21 @@ def submit_ticket(
      if ingestion_report:
@@ -500,7 +500,7 @@ class AuditManager:
  from typing import List, Tuple, Any, Optional, Dict
  from app.security.models import RemediationReport
 +from app.security.security_integration import get_pdp_engine
-+from security_core.audit import AuditEvent
++from langchain_security_extension.security_core.audit import AuditEvent
  
 @@ -73,6 +75,27 @@ def enforce_ingestion_security(
      request: Any,

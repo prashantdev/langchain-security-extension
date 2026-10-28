@@ -145,7 +145,7 @@ CLEARANCE_RANK_MAP: Dict[str, int] = {
     </div>
     <span class="code-lang">PYTHON</span>
   </div>
-  <pre><code class="language-python">from security_core.registry import SecurityRegistry
+  <pre><code class="language-python">from langchain_security_extension.security_core.registry import SecurityRegistry
 
 # Register configured PDP engine and resolver for global PEP resolution
 SecurityRegistry.configure(
@@ -253,7 +253,7 @@ adapter = RemotePDPAdapter.create(
 <ul>
     <li>
         <strong>Test 19: Remote OPA PDP Circuit Breaker Fail-Closed (<code>19-remote-opa-pdp-circuit-breaker-fail-closed.sh</code>)</strong><br />
-        Verifies that during remote network dropouts, socket timeouts, or HTTP 5xx responses, the OPA adapter trips its circuit breaker and immediately returns a fail-closed <code>DENY</code>, halting execution safely.
+        Verifies that during remote network dropouts, socket timeouts, or HTTP 5xx responses, the OPA adapter trips its circuit breaker, returns a fail-closed <code>DENY</code> with <code>[EVENT_CIRCUIT_BREAKER_OPEN | EVENT_CIRCUIT_BREAKER_TRANSITION | LOCAL_PDP_FALLBACK]</code> diagnostic tags, and halts execution safely returning <code>remediation_sec=BLOCKED_CIRCUIT_BREAKER</code> with HTTP 403 Forbidden.
         <div class="code-block-container">
   <div class="code-block-header">
     <span class="code-lang">BASH</span>

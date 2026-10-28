@@ -101,12 +101,12 @@
 
 <p>At the agent entry boundary, <code>SecureRunnable</code> inspects the caller's authenticated identity against the configured <code>target_tenant</code> boundary set. When <code>engine.enforce_strict_tenant_isolation = True</code> is enabled on the Policy Decision Point (PDP), any cross-tenant mismatch immediately logs a <code>TENANT_BOUND_VIOLATION</code> event with <code>SEVERITY_CRITICAL_ALERT</code> directly within <code>pdp.evaluate()</code>. The factory method <code>AgentAccessDeniedException.for_agent()</code> detects the <code>TENANT_MISMATCH</code> diagnostic reason and raises a typed <code>TenantIsolationError</code>.</p>
 
-<p><strong>security_adapter_langchain/runnable_guard.py</strong></p>
+<p><strong>langchain_security_extension/security_adapter_langchain/runnable_guard.py</strong></p>
 <div class="code-block-container code-block-library">
   <div class="code-block-header">
     <div class="code-block-title">
       <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-      <span class="code-filename">security_adapter_langchain/runnable_guard.py</span>
+      <span class="code-filename">langchain_security_extension/security_adapter_langchain/runnable_guard.py</span>
     </div>
     <span class="code-lang">PYTHON</span>
   </div>
@@ -336,12 +336,12 @@ def get_pdp_engine() -> EmbeddedPolicyEngine:
 
 <p>In enterprise RAG architectures, multi-tenancy cannot rely on system prompts instructing the model to <em>"only read runbooks for your organization"</em>—a pattern vulnerable to prompt injection and retrieval leakage. Retrieval must enforce tenant isolation at query compilation time using <strong>Deterministic Filter Push-Down</strong>: <code>SecureRetriever</code> automatically injects <code>{SEC_TENANT_ID: identity.tenant_id}</code> into the vector store AST filter, ensuring foreign-tenant chunks are excluded at the database index layer before similarity vectors are compared.</p>
 
-<p><strong>security_adapter_langchain/retriever_wrapper.py</strong></p>
+<p><strong>langchain_security_extension/security_adapter_langchain/retriever_wrapper.py</strong></p>
 <div class="code-block-container code-block-library">
   <div class="code-block-header">
     <div class="code-block-title">
       <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-      <span class="code-filename">security_adapter_langchain/retriever_wrapper.py</span>
+      <span class="code-filename">langchain_security_extension/security_adapter_langchain/retriever_wrapper.py</span>
     </div>
     <span class="code-lang">PYTHON</span>
   </div>

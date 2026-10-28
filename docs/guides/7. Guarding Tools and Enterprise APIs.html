@@ -62,12 +62,12 @@
 
 <p>In your enterprise application, you implement <code>EntityAttributeResolverSPI</code> to connect the security framework to your organization's asset databases, configuration management systems (CMDB), or directory services:</p>
 
-<p><strong>security_core/cel_evaluator.py</strong></p>
+<p><strong>langchain_security_extension/security_core/cel_evaluator.py</strong></p>
 <div class="code-block-container code-block-library">
   <div class="code-block-header">
     <div class="code-block-title">
       <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-      <span class="code-filename">security_core/cel_evaluator.py</span>
+      <span class="code-filename">langchain_security_extension/security_core/cel_evaluator.py</span>
     </div>
     <span class="code-lang">PYTHON</span>
   </div>
@@ -86,7 +86,7 @@ class EntityAttributeResolverSPI(ABC):
 
 <p><em>Explanation:</em> The library defines this abstract interface so policy evaluation remains completely decoupled from enterprise asset repositories. If <code>resolve()</code> returns <code>None</code>, the CEL engine raises a fail-closed exception.</p>
 
-<p>In our demonstrator assistant, this interface is implemented in a dedicated resolver class to look up server ownership records:</p>
+<p>In our demonstrator assistant, this interface is satisfied by a dedicated resolver class (using structural duck-typing conforming to the SPI contract) to look up server ownership records:</p>
 
 <p>New File: <strong>app/security/entity_resolver.py</strong></p>
 <div class="code-block-container code-block-assistant">
@@ -97,7 +97,7 @@ class EntityAttributeResolverSPI(ABC):
     </div>
     <span class="code-lang">PYTHON</span>
   </div>
-  <pre><code class="language-python">class IncidentAssistantEntityResolver(EntityAttributeResolverSPI):
+  <pre><code class="language-python">class IncidentAssistantEntityResolver:
     """Resolves server department ownership from master inventory records."""
 
     def resolve(self, entity_type: str, entity_id: str) -> Optional[Dict[str, Any]]:
@@ -300,12 +300,12 @@ class EntityAttributeResolverSPI(ABC):
 
 <p>To prevent the LLM from hallucinating or forging security contexts, the security adapter strips framework context parameters from tool schemas before presenting them to the model:</p>
 
-<p><strong>security_adapter_langchain/tool_decorator.py</strong></p>
+<p><strong>langchain_security_extension/security_adapter_langchain/tool_decorator.py</strong></p>
 <div class="code-block-container code-block-library">
   <div class="code-block-header">
     <div class="code-block-title">
       <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-      <span class="code-filename">security_adapter_langchain/tool_decorator.py</span>
+      <span class="code-filename">langchain_security_extension/security_adapter_langchain/tool_decorator.py</span>
     </div>
     <span class="code-lang">PYTHON</span>
   </div>

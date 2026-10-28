@@ -70,19 +70,19 @@
 
 <p>The enrichment stage supports custom DLP (Data Loss Prevention: automated software tools that detect and prevent the exposure of sensitive data) scanners, regex matchers, and structural header parsers via the <code>ChunkSecurityEnricherSPI</code>. All enrichers must adhere to the <strong>Monotonic Classification Invariant</strong>: an enricher can elevate a chunk to a higher classification tier, but it can never weaken the parent document's baseline classification.</p>
 
-<p><strong>security_adapter_langchain/ingestion.py</strong></p>
+<p><strong>langchain_security_extension/security_adapter_langchain/ingestion.py</strong></p>
 <div class="code-block-container code-block-library">
   <div class="code-block-header">
     <div class="code-block-title">
       <span class="code-badge code-badge-library">SECURITY LIBRARY SNIPPET (INFORMATIVE)</span>
-      <span class="code-filename">security_adapter_langchain/ingestion.py</span>
+      <span class="code-filename">langchain_security_extension/security_adapter_langchain/ingestion.py</span>
     </div>
     <span class="code-lang">PYTHON</span>
   </div>
-  <pre><code class="language-python"># security_adapter_langchain/ingestion.py
+  <pre><code class="language-python"># langchain_security_extension/security_adapter_langchain/ingestion.py
 from typing import Dict, Any
-from security_adapter_langchain.ingestion import ChunkSecurityEnricherSPI, ChunkEnrichmentContext
-from security_core.constants import (
+from langchain_security_extension.security_adapter_langchain.ingestion import ChunkSecurityEnricherSPI, ChunkEnrichmentContext
+from langchain_security_extension.security_core.constants import (
     SEC_CLASSIFICATION_LEVEL,
     SEC_CLEARANCE_FLOOR,
     CLASSIFICATION_CLEARANCE_MAP,
@@ -184,7 +184,7 @@ class HeadingClassificationEnricher(ChunkSecurityEnricherSPI):
 
 <h2>Admission Control &amp; Ingestion Policy Modes</h2>
 
-<p>When an unlabelled or malformed chunk reaches the validation boundary, the admission controller in <code>SecurityEnvelopeValidator</code> can be set to enforce one of three operational fallback policies configured via <code>SecureVectorStoreIngestor.create(..., ingestion_mode=...)</code> or the <code>security.ingestion.mode</code> application property. These modes are defined in <code>security_core.constants</code>:</p>
+<p>When an unlabelled or malformed chunk reaches the validation boundary, the admission controller in <code>SecurityEnvelopeValidator</code> can be set to enforce one of three operational fallback policies configured via <code>SecureVectorStoreIngestor.create(..., ingestion_mode=...)</code> or the <code>security.ingestion.mode</code> application property. These modes are defined in <code>langchain_security_extension.security_core.constants</code>:</p>
 
 <table>
   <thead>
