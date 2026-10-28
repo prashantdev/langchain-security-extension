@@ -321,8 +321,12 @@ class RemotePDPAdapter(PolicyDecisionEngine):
         if isinstance(req_config, dict) and isinstance(req_config.get("configurable"), dict):
             req_config["configurable"]["sec:circuit_breaker_state"] = self._state.value
 
+        diag_reason = reason
+        if self._state == CircuitBreakerState.OPEN and EVENT_CIRCUIT_BREAKER_OPEN not in diag_reason:
+            diag_reason = f"{reason} [{EVENT_CIRCUIT_BREAKER_OPEN} | {EVENT_CIRCUIT_BREAKER_TRANSITION} | LOCAL_PDP_FALLBACK]"
+
         return PolicyDecision.deny(
-            diagnostic_reason=reason,
+            diagnostic_reason=diag_reason,
             obligations={},
         )
 

@@ -228,17 +228,20 @@ def secured_tool(
 
             # Resolve PDP engine if None
             engine = pdp_engine
+            if engine is None and "config" in kwargs and isinstance(kwargs["config"], dict):
+                cfg_conf = kwargs["config"].get("configurable", {})
+                if isinstance(cfg_conf, dict):
+                    engine = cfg_conf.get("sec:pdp_engine") or cfg_conf.get("pdp_engine")
+
             if engine is None and args and hasattr(args[0], "pdp_engine") and getattr(args[0], "pdp_engine") is not None:
                 engine = getattr(args[0], "pdp_engine")
 
             if engine is None and "config" in kwargs and isinstance(kwargs["config"], dict):
                 cfg_conf = kwargs["config"].get("configurable", {})
                 if isinstance(cfg_conf, dict):
-                    engine = cfg_conf.get("sec:pdp_engine") or cfg_conf.get("pdp_engine")
-                    if engine is None:
-                        vh = cfg_conf.get("sec:violation_handler")
-                        if vh and hasattr(vh, "pdp_engine"):
-                            engine = vh.pdp_engine
+                    vh = cfg_conf.get("sec:violation_handler")
+                    if vh and hasattr(vh, "pdp_engine"):
+                        engine = vh.pdp_engine
                 if engine is None:
                     callbacks_list = kwargs["config"].get("callbacks", [])
                     if isinstance(callbacks_list, list):

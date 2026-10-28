@@ -420,6 +420,11 @@ class SecureRetriever(BaseRetriever):
             if decision.is_permitted:
                 pruned.append(doc)
             else:
+                if isinstance(config, dict) and isinstance(config.get("configurable"), dict):
+                    pruned_titles = config["configurable"].setdefault("sec:pruned_doc_titles", [])
+                    first_line = doc.page_content.splitlines()[0].lstrip("#").strip() if doc.page_content else ""
+                    if first_line and first_line not in pruned_titles:
+                        pruned_titles.append(first_line)
                 if audit_manager:
                     audit_manager.record_event(AuditEvent.create(
                         subject_id=resolved_identity.subject_id,
