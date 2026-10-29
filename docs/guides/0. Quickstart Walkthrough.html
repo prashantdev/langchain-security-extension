@@ -50,8 +50,9 @@
 <h3>1. Prerequisites</h3>
 <ul>
     <li><strong>Python 3.9+:</strong> A shared Python virtual environment.</li>
-    <li><strong>Configured LLM Service:</strong> The demonstrator issues real model calls during triage and remediation. By default, it connects to a local <strong>Ollama</strong> instance (<code>http://localhost:11434</code> with model <code>llama3.2:3b</code>). Alternatively, you can configure any OpenAI, Gemini, or Claude compatible endpoint in <code>config.properties</code>.</li>
+    <li><strong>Configured LLM Service(s):</strong> The demonstrator issues real model calls across a multi-agent pipeline. Both <code>model1</code> (used by the <strong>Triage Agent</strong>) and <code>model2</code> (used by the <strong>Remediation Agent</strong>) must be configured in <code>config.properties</code>. By default, both connect to a local <strong>Ollama</strong> instance (<code>http://localhost:11434</code> with model <code>llama3.2:3b</code>). They can be the exact same model or different models, and can be directed to any OpenAI, Gemini, or Claude compatible endpoint.</li>
 </ul>
+
 
 <h3>2. Clone Repositories Side by Side</h3>
 <p>Clone both repositories into a common workspace directory:</p>
@@ -87,20 +88,76 @@ cd ../langchain-enterprise-incident-assistant
 pip install -e ".[dev]"</code></pre>
 </div>
 
-<h3>4. Verify LLM Service Availability</h3>
-<p>Ensure your configured LLM backend is running. For local Ollama users:</p>
+<h3>4. Multi-Agent Model Configuration (<code>model1</code> &amp; <code>model2</code>)</h3>
+<p>The companion assistant is specifically architected to demonstrate <strong>multi-agent collaboration across heterogeneous models</strong> while enforcing a <strong>standard, uniform security posture across everything</strong>:</p>
+
+<ul>
+    <li><strong><code>model1</code> (Triage Agent):</strong> Drives initial ticket classification, severity assessment, and entity/parameter extraction from incoming user requests.</li>
+    <li><strong><code>model2</code> (Remediation Agent):</strong> Drives runbook retrieval, SOP troubleshooting reasoning, and tool dispatch (e.g., executing diagnostics, restarting services, or managing access).</li>
+</ul>
+
+<p>Both <code>model1</code> and <code>model2</code> must be configured in <code>langchain-enterprise-incident-assistant/config.properties</code>:</p>
+
+<ul>
+    <li><strong>Identical Models (Default):</strong> You can configure both <code>model1</code> and <code>model2</code> to point to the exact same model (e.g., local Ollama running <code>llama3.2:3b</code>). This requires minimal hardware resources and is ideal for quick local experimentation.</li>
+    <li><strong>Different Models:</strong> You can configure distinct models for each agent to test heterogeneous deployments (e.g., an efficient local SLM like <code>llama3.2:3b</code> for <code>model1</code> triage, paired with a frontier reasoning model like Gemini 3.5 Flash or GPT-4o for <code>model2</code> remediation).</li>
+</ul>
+
+<blockquote>
+    <p><strong>Standard Security Across Everything:</strong> Regardless of whether <code>model1</code> and <code>model2</code> share the same model or use completely different local or commercial providers, <code>langchain-security-extension</code> applies identical, zero-trust security controls across all agent steps: policy decision point (PDP) authorization, tool parameter interception, PII/credential redaction, token budgets, anti-looping protections, and SIEM audit logging.</p>
+</blockquote>
+
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">CONFIG</span>
+      <span class="code-filename">config.properties (Agent Model Configuration)</span>
+    </div>
+    <span class="code-lang">PROPERTIES</span>
+  </div>
+  <pre><code class="language-properties"># ---------------------------------------------------------------------------
+# LLM Config - Model 1: Used by Triage Agent
+# ---------------------------------------------------------------------------
+model1.baseUrl=http://localhost:11434
+model1.modelclass=ollama
+model1.modelname=llama3.2:3b
+model1.apikey=
+model1.timeout=300s
+
+# ---------------------------------------------------------------------------
+# LLM Config - Model 2: Used by Remediation Agent
+# (Can be the same model as model1, or a different local/frontier model)
+# ---------------------------------------------------------------------------
+model2.baseUrl=http://localhost:11434
+model2.modelclass=ollama
+model2.modelname=llama3.2:3b
+model2.apikey=
+model2.timeout=300s
+
+# ---------------------------------------------------------------------------
+# Example Alternative: Configuring a Frontier Model for model2
+# ---------------------------------------------------------------------------
+# model2.baseUrl=https://generativelanguage.googleapis.com/v1beta/openai/
+# model2.modelclass=openai
+# model2.modelname=gemini-3.5-flash
+# model2.apikey=YOUR_API_KEY
+# model2.timeout=60s</code></pre>
+</div>
+
+<h3>5. Verify LLM Service Availability</h3>
+<p>Ensure your configured LLM backend(s) are running. For local Ollama users:</p>
 
 <div class="code-block-container">
   <div class="code-block-header">
     <span class="code-lang">BASH</span>
   </div>
   <pre><code class="language-bash"># Ensure Ollama is active and model is pulled
-ollama serve &
+ollama serve &amp;
 ollama pull llama3.2:3b</code></pre>
 </div>
 
 <blockquote>
-    <p><strong>Configuring Alternative Providers:</strong> To point to OpenAI, Google Gemini, or Claude instead, edit <code>config.properties</code> in <code>langchain-enterprise-incident-assistant</code> and set <code>model1.baseUrl</code>, <code>model1.modelclass=openai</code>, <code>model1.modelname</code>, and <code>model1.apikey</code>.</p>
+    <p><strong>Universal LLM Reachability Check:</strong> The test runner (<code>./run-security-suite.sh</code>) actively queries the configured <code>baseUrl</code> in <code>config.properties</code> before executing tests. It seamlessly supports local Ollama, Google Gemini, OpenAI, Claude, or custom enterprise gateway endpoints.</p>
 </blockquote>
 
 <hr />
@@ -403,49 +460,49 @@ ollama pull llama3.2:3b</code></pre>
     <tr>
       <td>01</td>
       <td><code>01-ingestion-envelope-validation-enforced.sh</code></td>
-      <td>Missing mandatory <code>sec:*</code> tags rejected during document segment ingestion.</td>
+      <td>Missing mandatory <code>sec:*</code> tags rejected during document segment ingestion.<br /><small><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html">&rarr; See Chapter 5: Ingestion Pipeline</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>02</td>
       <td><code>02-ingestion-header-classification-elevation.sh</code></td>
-      <td>Parser detects structural headers (<code>## [CONFIDENTIAL]</code>) and elevates classification floor.</td>
+      <td>Parser detects structural headers (<code>## [CONFIDENTIAL]</code>) and elevates classification floor.<br /><small><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html">&rarr; See Chapter 5: Ingestion Pipeline</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>03</td>
       <td><code>03-ingestion-strict-fail-closed-atomic-rollback.sh</code></td>
-      <td>Under strict fail-closed mode, malformed metadata causes atomic rollback of document batch.</td>
+      <td>Under strict fail-closed mode, malformed metadata causes atomic rollback of document batch.<br /><small><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html">&rarr; See Chapter 5: Ingestion Pipeline</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>04</td>
       <td><code>04-ingestion-permissive-quarantine-elevation.sh</code></td>
-      <td>Unlabelled chunks in permissive mode are automatically tagged <code>sec:quarantined = true</code>.</td>
+      <td>Unlabelled chunks in permissive mode are automatically tagged <code>sec:quarantined = true</code>.<br /><small><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html">&rarr; See Chapter 5: Ingestion Pipeline</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>05</td>
       <td><code>05-ingestion-monotonic-classification-elevation.sh</code></td>
-      <td>Strictly rejects illegal de-escalation of chunk clearance below parent document baseline.</td>
+      <td>Strictly rejects illegal de-escalation of chunk clearance below parent document baseline.<br /><small><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html">&rarr; See Chapter 5: Ingestion Pipeline</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>06</td>
       <td><code>06-hmac-envelope-tamper-detection.sh</code></td>
-      <td>Direct tampering of metadata tags in storage fails HMAC verification (<code>INVALID_HMAC</code>).</td>
+      <td>Direct tampering of metadata tags in storage fails HMAC verification (<code>INVALID_HMAC</code>).<br /><small><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html">&rarr; See Chapter 5: Ingestion Pipeline</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>07</td>
       <td><code>07-ingestion-unlabelled-chunk-quarantine-policy.sh</code></td>
-      <td>Chunks lacking explicit envelope metadata are pruned under strict admission policies.</td>
+      <td>Chunks lacking explicit envelope metadata are pruned under strict admission policies.<br /><small><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html">&rarr; See Chapter 5: Ingestion Pipeline</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
@@ -467,49 +524,49 @@ ollama pull llama3.2:3b</code></pre>
     <tr>
       <td>08</td>
       <td><code>08-cel-parameter-department-mismatch-blocked.sh</code></td>
-      <td>CEL halts tool when caller department does not own the target infrastructure asset.</td>
+      <td>CEL halts tool when caller department does not own the target infrastructure asset.<br /><small><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html">&rarr; See Chapter 7: Guarding Tools &amp; APIs</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>09</td>
       <td><code>09-dual-mode-hard-abort-enforced.sh</code></td>
-      <td>Mutative tool violations trigger an immediate Hard Abort, halting execution with 0 tokens.</td>
+      <td>Mutative tool violations trigger an immediate Hard Abort, halting execution with 0 tokens.<br /><small><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html">&rarr; See Chapter 7: Guarding Tools &amp; APIs</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>10</td>
       <td><code>10-policy-brute-force-retry-loop-halted.sh</code></td>
-      <td>Halts agent execution when model repeatedly retries denied tool dispatches.</td>
+      <td>Halts agent execution when model repeatedly retries denied tool dispatches.<br /><small><a href="8.%20Defending%20Against%20Agent%20Looping.html">&rarr; See Chapter 8: Defending Agent Looping</a> &middot; <a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html">Chapter 7: Tool Guardrails</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>11</td>
       <td><code>11-cel-null-entity-resolution-fail-closed.sh</code></td>
-      <td>CEL evaluation fails closed (DENY) when target asset ID cannot be resolved in CMDB.</td>
+      <td>CEL evaluation fails closed (DENY) when target asset ID cannot be resolved in CMDB.<br /><small><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html">&rarr; See Chapter 7: Guarding Tools &amp; APIs</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>12</td>
       <td><code>12-tool-interceptor-schema-hiding-verification.sh</code></td>
-      <td>Strips internal security identity context from model OpenAPI schemas (Schema Hiding).</td>
+      <td>Strips internal security identity context from model OpenAPI schemas (Schema Hiding).<br /><small><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html">&rarr; See Chapter 7: Guarding Tools &amp; APIs</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>13</td>
       <td><code>13-model-feedback-soft-refusal-returned.sh</code></td>
-      <td>Informational tool denials return safe synthetic refusal messages instead of hard halting.</td>
+      <td>Informational tool denials return safe synthetic refusal messages instead of hard halting.<br /><small><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html">&rarr; See Chapter 7: Guarding Tools &amp; APIs</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>14</td>
       <td><code>14-cel-entity-attribute-hydration-resolved.sh</code></td>
-      <td>Hydrates live CMDB entity attributes dynamically for CEL ABAC evaluation.</td>
+      <td>Hydrates live CMDB entity attributes dynamically for CEL ABAC evaluation.<br /><small><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html">&rarr; See Chapter 7: Guarding Tools &amp; APIs</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
@@ -531,21 +588,21 @@ ollama pull llama3.2:3b</code></pre>
     <tr>
       <td>15</td>
       <td><code>15-rag-clearance-data-leakage-prevented.sh</code></td>
-      <td>Prevents Level 1 callers from retrieving Level 3 runbooks via vector pre-filtering.</td>
+      <td>Prevents Level 1 callers from retrieving Level 3 runbooks via vector pre-filtering.<br /><small><a href="6.%20Integrating%20Your%20Vector%20Database.html">&rarr; See Chapter 6: Integrating Vector DB</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>16</td>
       <td><code>16-rag-topk-predictive-oversampling-and-paging.sh</code></td>
-      <td>Inflates Top-K retrieval window (oversampling) to prevent result starvation during pruning.</td>
+      <td>Inflates Top-K retrieval window (oversampling) to prevent result starvation during pruning.<br /><small><a href="6.%20Integrating%20Your%20Vector%20Database.html">&rarr; See Chapter 6: Integrating Vector DB</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>17</td>
       <td><code>17-rag-vectorstore-ast-prefilter-translation.sh</code></td>
-      <td>Translates caller identity into native VectorStore search filters prior to cosine query.</td>
+      <td>Translates caller identity into native VectorStore search filters prior to cosine query.<br /><small><a href="6.%20Integrating%20Your%20Vector%20Database.html">&rarr; See Chapter 6: Integrating Vector DB</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
@@ -567,35 +624,35 @@ ollama pull llama3.2:3b</code></pre>
     <tr>
       <td>18</td>
       <td><code>18-pdp-two-tier-cache-hit-performance.sh</code></td>
-      <td>Deduplicates policy checks via Tier 1 (invocation) and Tier 2 (TTL) decision caching.</td>
+      <td>Deduplicates policy checks via Tier 1 (invocation) and Tier 2 (TTL) decision caching.<br /><small><a href="3.%20Setting%20Up%20Your%20Authorization%20Engine.html">&rarr; See Chapter 3: Authorization Engine</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>19</td>
       <td><code>19-remote-opa-pdp-circuit-breaker-fail-closed.sh</code></td>
-      <td>Trips circuit breaker to fail-closed DENY when remote OPA policy engine is unreachable.</td>
+      <td>Trips circuit breaker to fail-closed DENY when remote OPA policy engine is unreachable.<br /><small><a href="3.%20Setting%20Up%20Your%20Authorization%20Engine.html">&rarr; See Chapter 3: Authorization Engine</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>20</td>
       <td><code>20-framework-starter-identity-propagation.sh</code></td>
-      <td>Maps perimeter auth context deterministically into <code>RunnableConfig</code> envelope.</td>
+      <td>Maps perimeter auth context deterministically into <code>RunnableConfig</code> envelope.<br /><small><a href="2.%20Connecting%20Your%20Identity%20Provider.html">&rarr; See Chapter 2: Identity Provider</a> &middot; <a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html">Chapter 4: Entry Points</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>21</td>
       <td><code>21-pdp-circuit-breaker-state-machine-transitions.sh</code></td>
-      <td>Verifies circuit breaker state transitions (CLOSED &rarr; OPEN &rarr; HALF_OPEN) during outages.</td>
+      <td>Verifies circuit breaker state transitions (CLOSED &rarr; OPEN &rarr; HALF_OPEN) during outages.<br /><small><a href="3.%20Setting%20Up%20Your%20Authorization%20Engine.html">&rarr; See Chapter 3: Authorization Engine</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>22</td>
       <td><code>22-pdp-cache-eviction-on-identity-invalidation.sh</code></td>
-      <td>Evicts cached L1/L2 verdicts immediately when user roles or clearance are revoked.</td>
+      <td>Evicts cached L1/L2 verdicts immediately when user roles or clearance are revoked.<br /><small><a href="3.%20Setting%20Up%20Your%20Authorization%20Engine.html">&rarr; See Chapter 3: Authorization Engine</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
@@ -617,63 +674,63 @@ ollama pull llama3.2:3b</code></pre>
     <tr>
       <td>23</td>
       <td><code>23-prompt-injection-blocked.sh</code></td>
-      <td>Neutralizes instruction overrides and emits <code>PROMPT_INJECTION_DETECTED</code>.</td>
+      <td>Neutralizes instruction overrides and emits <code>PROMPT_INJECTION_DETECTED</code>.<br /><small><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html">&rarr; See Chapter 4: Protecting Entry Points</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>24</td>
       <td><code>24-siem-audit-sanitization-enforced.sh</code></td>
-      <td>Emits tamper-evident structured audit events to SIEM sinks via non-blocking ring buffer.</td>
+      <td>Emits tamper-evident structured audit events to SIEM sinks via non-blocking ring buffer.<br /><small><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html">&rarr; See Chapter 10: SIEM &amp; Log Aggregators</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>25</td>
       <td><code>25-pii-regex-and-masked-annotation-scrubbing.sh</code></td>
-      <td>Scrubs passwords, AWS keys, Bearer tokens, and Luhn-valid credit cards in-flight.</td>
+      <td>Scrubs passwords, AWS keys, Bearer tokens, and Luhn-valid credit cards in-flight.<br /><small><a href="9.%20Sanitizing%20Sensitive%20Payloads.html">&rarr; See Chapter 9: Sanitizing Payloads</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>26</td>
       <td><code>26-tenant-isolation-boundary-violation-alert.sh</code></td>
-      <td>Blocks foreign tenant operations and raises critical <code>TENANT_BOUND_VIOLATION</code> alert.</td>
+      <td>Blocks foreign tenant operations and raises critical <code>TENANT_BOUND_VIOLATION</code> alert.<br /><small><a href="11.%20Enforcing%20Multi-Tenancy.html">&rarr; See Chapter 11: Enforcing Multi-Tenancy</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>27</td>
       <td><code>27-opentelemetry-trace-span-correlation.sh</code></td>
-      <td>Extracts W3C <code>traceparent</code> headers and correlates trace and span IDs to audit events.</td>
+      <td>Extracts W3C <code>traceparent</code> headers and correlates trace and span IDs to audit events.<br /><small><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html">&rarr; See Chapter 10: SIEM &amp; Log Aggregators</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>28</td>
       <td><code>28-siem-policy-brute-force-alert-generation.sh</code></td>
-      <td>Emits <code>POLICY_BRUTE_FORCE_SCANNING</code> alert when caller exceeds denial threshold.</td>
+      <td>Emits <code>POLICY_BRUTE_FORCE_SCANNING</code> alert when caller exceeds denial threshold.<br /><small><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html">&rarr; See Chapter 10: SIEM &amp; Log Aggregators</a> &middot; <a href="8.%20Defending%20Against%20Agent%20Looping.html">Chapter 8: Anti-Looping</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>29</td>
       <td><code>29-anti-loop-retry-cap-terminated.sh</code></td>
-      <td>Terminates agent execution upon reaching maximum consecutive tool violations cap.</td>
+      <td>Terminates agent execution upon reaching maximum consecutive tool violations cap.<br /><small><a href="8.%20Defending%20Against%20Agent%20Looping.html">&rarr; See Chapter 8: Defending Agent Looping</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>30</td>
       <td><code>30-telemetry-sanitization-raw-event-verified.sh</code></td>
-      <td>Verifies raw emitted event dictionaries contain zero plaintext credentials or secrets.</td>
+      <td>Verifies raw emitted event dictionaries contain zero plaintext credentials or secrets.<br /><small><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html">&rarr; See Chapter 10: SIEM &amp; Log Aggregators</a> &middot; <a href="9.%20Sanitizing%20Sensitive%20Payloads.html">Chapter 9: Sanitizing Payloads</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
     <tr>
       <td>31</td>
       <td><code>31-sliding-window-abuse-throttling.sh</code></td>
-      <td>Throttles cross-turn abuse over a sliding temporal window and auto-prunes expired denials.</td>
+      <td>Throttles cross-turn abuse over a sliding temporal window and auto-prunes expired denials.<br /><small><a href="8.%20Defending%20Against%20Agent%20Looping.html">&rarr; See Chapter 8: Defending Agent Looping</a></small></td>
       <td><span style="color: red; font-weight: bold;">FAIL</span></td>
       <td><span style="color: green; font-weight: bold;">PASS</span></td>
     </tr>
@@ -684,7 +741,7 @@ ollama pull llama3.2:3b</code></pre>
 
 <h2>Summary &amp; Next Steps</h2>
 
-<p>Now that you have seen the difference between perimeter-only agents and zero-trust code-level PEPs in practice, proceed through the implementation chapters to explore each component in detail:</p>
+<p>Now that you have seen the difference between perimeter-only agents and zero-trust code-level PEPs in practice, proceed through the implementation chapters to explore how each component can be implemented in your enterprise applications:</p>
 
 <ul>
     <li><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><strong>Chapter 1: Architecture Blueprint &amp; System Boundaries</strong></a> — The 4 core enforcement checkpoints.</li>

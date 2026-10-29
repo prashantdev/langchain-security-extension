@@ -373,31 +373,61 @@
       <td><code>model1.baseUrl</code><br /><code>MODEL1_BASEURL</code></td>
       <td>String (URL)</td>
       <td><code>http://localhost:11434</code></td>
-      <td>Base URL of the primary LLM provider (Ollama, OpenAI, Gemini, or Claude).</td>
+      <td>Base URL of LLM provider for <strong>Model 1 (Triage Agent)</strong>. Supports Ollama, OpenAI, Gemini, or Claude.</td>
     </tr>
     <tr>
       <td><code>model1.modelclass</code><br /><code>MODEL1_MODELCLASS</code></td>
       <td>String<br /><code>ollama</code> | <code>openai</code></td>
       <td><code>ollama</code></td>
-      <td>ChatModel adapter protocol. Use <code>openai</code> for OpenAI, Gemini Flash (OpenAI compatibility mode), or Claude gateways.</td>
+      <td>ChatModel adapter protocol for <strong>Model 1 (Triage Agent)</strong>. Use <code>openai</code> for OpenAI, Gemini Flash (OpenAI compatibility mode), or Claude gateways.</td>
     </tr>
     <tr>
       <td><code>model1.modelname</code><br /><code>MODEL1_MODELNAME</code></td>
       <td>String</td>
       <td><code>llama3.2:3b</code></td>
-      <td>Target model identifier passed in API requests.</td>
+      <td>Target model identifier for <strong>Model 1 (Triage Agent)</strong>.</td>
     </tr>
     <tr>
       <td><code>model1.apikey</code><br /><code>MODEL1_APIKEY</code></td>
       <td>String</td>
       <td><em>Optional (Empty)</em></td>
-      <td>API key for commercial providers (OpenAI, Google Gemini, Anthropic).</td>
+      <td>API key for commercial providers for <strong>Model 1</strong>.</td>
     </tr>
     <tr>
       <td><code>model1.timeout</code><br /><code>MODEL1_TIMEOUT</code></td>
       <td>String</td>
       <td><code>300s</code></td>
-      <td>HTTP client timeout for LLM inferences.</td>
+      <td>HTTP client timeout for <strong>Model 1</strong> inferences.</td>
+    </tr>
+    <tr>
+      <td><code>model2.baseUrl</code><br /><code>MODEL2_BASEURL</code></td>
+      <td>String (URL)</td>
+      <td><code>http://localhost:11434</code></td>
+      <td>Base URL of LLM provider for <strong>Model 2 (Remediation Agent)</strong>. Can match <code>model1</code> or point to an independent model backend.</td>
+    </tr>
+    <tr>
+      <td><code>model2.modelclass</code><br /><code>MODEL2_MODELCLASS</code></td>
+      <td>String<br /><code>ollama</code> | <code>openai</code></td>
+      <td><code>ollama</code></td>
+      <td>ChatModel adapter protocol for <strong>Model 2 (Remediation Agent)</strong>.</td>
+    </tr>
+    <tr>
+      <td><code>model2.modelname</code><br /><code>MODEL2_MODELNAME</code></td>
+      <td>String</td>
+      <td><code>llama3.2:3b</code></td>
+      <td>Target model identifier for <strong>Model 2 (Remediation Agent)</strong>.</td>
+    </tr>
+    <tr>
+      <td><code>model2.apikey</code><br /><code>MODEL2_APIKEY</code></td>
+      <td>String</td>
+      <td><em>Optional (Empty)</em></td>
+      <td>API key for commercial providers for <strong>Model 2</strong>.</td>
+    </tr>
+    <tr>
+      <td><code>model2.timeout</code><br /><code>MODEL2_TIMEOUT</code></td>
+      <td>String</td>
+      <td><code>300s</code></td>
+      <td>HTTP client timeout for <strong>Model 2</strong> inferences.</td>
     </tr>
   </tbody>
 </table>
