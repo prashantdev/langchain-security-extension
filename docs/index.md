@@ -2,10 +2,10 @@
 
 [![Python Versions](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://pypi.org/project/langchain-security-extension/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/prashantdev/langchain-security-extension/blob/main/LICENSE)
-[![Zero-Dependency Core](https://img.shields.io/badge/core%20deps-zero%20dependencies-success.svg)](https://github.com/prashantdev/langchain-security-extension/tree/main/src/security_core)
-[![LangChain Compatible](https://img.shields.io/badge/LangChain-LCEL%20%26%20LangGraph-1C3C3C.svg)](https://python.langchain.com/)
+[![Zero-Dependency Core](https://img.shields.io/badge/core%20deps-zero%20dependencies-success.svg)](https://github.com/prashantdev/langchain-security-extension/tree/main/src/langchain_security_extension/security_core)
+[![LangChain Compatible](https://img.shields.io/badge/LangChain-LCEL-1C3C3C.svg)](https://python.langchain.com/)
 
-> **Deterministic, Zero-Trust Policy Enforcement Points (PEPs) for LangChain & LangGraph Agents**  
+> **Deterministic, Zero-Trust Policy Enforcement Points (PEPs) for LangChain Agents**  
 > Shift your enterprise AI from fragile, prompt-dependent guardrails to deterministic, code-level governance.
 
 ---
@@ -18,8 +18,8 @@ This documentation portal provides architectural blueprints, step-by-step rollou
 |---|---|---|
 | 📘 **Enterprise Implementation Guide** | 12-chapter comprehensive walkthrough using a real-world enterprise incident assistant to demonstrate hardening from scratch. | [Open Implementation Guide](guides/index.html) |
 | 📚 **API Reference** | Complete module specifications for `security_core`, `security_adapter_langchain`, and `security_pdp_opa`. | [Browse API Reference](api/index.html) |
-| 🧪 **Companion Reference Application** | Working FastAPI + LangChain demonstrator application illustrating baseline vulnerabilities (`master`) vs hardened controls (`secured3`). | [View on GitHub](https://github.com/prashantdev/langchain-enterprise-incident-assistant) |
-| 💻 **Source Code Repository** | Core library repository, issue tracker, and contribution guidelines. | [GitHub Repository](https://github.com/prashantdev/langchain-security-extension) |
+| 🧪 **Companion Reference Application** | Working FastAPI + LangChain demonstrator application illustrating baseline vulnerabilities (`master`) vs hardened controls (`secured`). | [View on GitHub](https://github.com/prashantdev/langchain-enterprise-incident-assistant) |
+| 💻 **Source Code Repository** | Core library repository, Installation instructions, issue tracker, and contribution guidelines. | [GitHub Repository](https://github.com/prashantdev/langchain-security-extension) |
 
 ---
 
@@ -83,7 +83,7 @@ The framework implements a distributed **Zero-Trust Policy Enforcement Architect
 
 ```mermaid
 flowchart TB
-    subgraph HostApp["Host Application Layer (Any LangChain / LangGraph App)"]
+    subgraph HostApp["Host Application Layer (Any LangChain App)"]
         Agent["LangChain Agent / LCEL Chain"]
         Tool["Python Tool Callables"]
         Retriever["Vector Store / Retriever"]
@@ -93,7 +93,6 @@ flowchart TB
         SR["SecureRunnable\n(Agent/Chain PEP)"]
         ST["@secured_tool\n(Tool Interceptor PEP)"]
         SRET["SecureRetriever\n(RAG Context Pre-Filter PEP)"]
-        LG["LangGraphNodeGuard\n(State Checkpoint PEP)"]
         IB["IdentityBridge\n(RunnableConfig Context Injector)"]
     end
 
@@ -127,7 +126,7 @@ flowchart TB
 
 | Zero-Trust Role | Library Component | Implementation Responsibilities |
 |---|---|---|
-| **PEP**<br/>(Policy Enforcement Point) | [`@secured_tool`](api/langchain_security_extension/security_adapter_langchain.html#secured_tool)<br/>[`SecureRunnable`](api/langchain_security_extension/security_adapter_langchain.html#SecureRunnable)<br/>[`SecureRetriever`](api/langchain_security_extension/security_adapter_langchain.html#SecureRetriever)<br/>[`LangGraphNodeGuard`](api/langchain_security_extension/security_adapter_langchain.html#LangGraphNodeGuard) | • Intercepts execution requests before tool/chain execution.<br/>• Enforces caller role and clearance floors.<br/>• Applies vector DB metadata pre-filters and prunes documents.<br/>• Emits immutable structured audit events to SIEM. |
+| **PEP**<br/>(Policy Enforcement Point) | [`@secured_tool`](api/langchain_security_extension/security_adapter_langchain.html#secured_tool)<br/>[`SecureRunnable`](api/langchain_security_extension/security_adapter_langchain.html#SecureRunnable)<br/>[`SecureRetriever`](api/langchain_security_extension/security_adapter_langchain.html#SecureRetriever) | • Intercepts execution requests before tool/chain execution.<br/>• Enforces caller role and clearance floors.<br/>• Applies vector DB metadata pre-filters and prunes documents.<br/>• Emits immutable structured audit events to SIEM. |
 | **PDP**<br/>(Policy Decision Point) | [`EmbeddedPolicyEngine`](api/langchain_security_extension/security_core.html#EmbeddedPolicyEngine)<br/>[`RemotePDPAdapter`](api/langchain_security_extension/security_pdp_opa.html#RemotePDPAdapter) | • Evaluates authorization requests deterministically.<br/>• Manages two-tier decision caching (L1 thread-local, L2 LRU TTL).<br/>• Resolves hierarchical role graphs and multi-tenant isolation.<br/>• Evaluates fail-closed / fail-open circuit breakers on remote PDP outages. |
 | **PIP**<br/>(Policy Information Point) | [`IdentityBridge`](api/langchain_security_extension/security_core.html#IdentityBridge)<br/>[`EntityAttributeResolverSPI`](api/langchain_security_extension/security_core.html#EntityAttributeResolverSPI) | • Converts inbound JWT/OAuth claims into immutable `SecurityIdentity`.<br/>• Injects identity into LangChain's native `RunnableConfig`.<br/>• Resolves dynamic entity attributes (e.g. server owner, user dept) for CEL rules. |
 | **PAP**<br/>(Policy Administration Point) | Declarative Decorators & CEL Expressions | • Declarative `@secured_tool` parameters (`required_roles`, `min_clearance`).<br/>• Common Expression Language rules evaluated over live arguments.<br/>• Metadata classification schemas (`sec.clearance`, `sec.department`). |

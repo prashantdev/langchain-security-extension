@@ -19,6 +19,7 @@ coverage.xml
 # Documentation build
 site/
 *.drawio
+build.sh
 
 # IDE and environment
 .idea/

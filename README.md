@@ -6,9 +6,9 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/prashantdev/langchain-security-extension/actions)
 [![Zero-Dependency Core](https://img.shields.io/badge/core%20deps-zero%20dependencies-success.svg)](src/langchain_security_extension/security_core)
-[![LangChain Compatible](https://img.shields.io/badge/LangChain-LCEL%20%26%20LangGraph-1C3C3C.svg)](https://python.langchain.com/)
+[![LangChain Compatible](https://img.shields.io/badge/LangChain-LCEL-1C3C3C.svg)](https://python.langchain.com/)
 
-> **Quick Intro:** This library provides deterministic, code-level Policy Enforcement Points (PEPs) for LangChain and LangGraph agents—shifting organizations from fragile, prompt-dependent guardrails to deterministic, enterprise-grade governance.
+> **Quick Intro:** This library provides deterministic, code-level Policy Enforcement Points (PEPs) for LangChain agents—shifting organizations from fragile, prompt-dependent guardrails to deterministic, enterprise-grade governance.
 >
 > 📖 **[Read the Enterprise Implementation Guide](https://prashantdev.github.io/langchain-security-extension/guides/)** for step-by-step architecture patterns, policy authoring, and production rollout instructions, or browse the **[Documentation Hub](https://prashantdev.github.io/langchain-security-extension/)**.
 
@@ -171,7 +171,7 @@ The framework implements a distributed **Zero-Trust Policy Enforcement Architect
 
 ```mermaid
 flowchart TB
-    subgraph HostApp["Host Application Layer (Any LangChain / LangGraph App)"]
+    subgraph HostApp["Host Application Layer (Any LangChain App)"]
         Agent["LangChain Agent / LCEL Chain"]
         Tool["Python Tool Callables"]
         Retriever["Vector Store / Retriever"]
@@ -181,7 +181,6 @@ flowchart TB
         SR["SecureRunnable\n(Agent/Chain PEP)"]
         ST["@secured_tool\n(Tool Interceptor PEP)"]
         SRET["SecureRetriever\n(RAG Context Pre-Filter PEP)"]
-        LG["LangGraphNodeGuard\n(State Checkpoint PEP)"]
         IB["IdentityBridge\n(RunnableConfig Context Injector)"]
     end
 
@@ -215,7 +214,7 @@ flowchart TB
 
 | Zero-Trust Role | Library Component | Implementation Responsibilities |
 |---|---|---|
-| **PEP**<br/>(Policy Enforcement Point) | [`@secured_tool`](src/langchain_security_extension/security_adapter_langchain/tool_decorator.py)<br/>[`SecureRunnable`](src/langchain_security_extension/security_adapter_langchain/runnable_guard.py)<br/>[`SecureRetriever`](src/langchain_security_extension/security_adapter_langchain/retriever_wrapper.py)<br/>[`LangGraphNodeGuard`](src/langchain_security_extension/security_adapter_langchain/langgraph_integration.py) | • Intercepts execution requests before tool/chain execution.<br/>• Enforces caller role and clearance floors.<br/>• Applies vector DB metadata pre-filters and prunes documents.<br/>• Emits immutable structured audit events to SIEM. |
+| **PEP**<br/>(Policy Enforcement Point) | [`@secured_tool`](src/langchain_security_extension/security_adapter_langchain/tool_decorator.py)<br/>[`SecureRunnable`](src/langchain_security_extension/security_adapter_langchain/runnable_guard.py)<br/>[`SecureRetriever`](src/langchain_security_extension/security_adapter_langchain/retriever_wrapper.py) | • Intercepts execution requests before tool/chain execution.<br/>• Enforces caller role and clearance floors.<br/>• Applies vector DB metadata pre-filters and prunes documents.<br/>• Emits immutable structured audit events to SIEM. |
 | **PDP**<br/>(Policy Decision Point) | [`EmbeddedPolicyEngine`](src/langchain_security_extension/security_core/pdp.py)<br/>[`RemoteOpaAdapter`](src/langchain_security_extension/security_pdp_opa/opa_adapter.py) | • Evaluates authorization requests deterministically.<br/>• Manages two-tier decision caching (L1 thread-local, L2 LRU TTL).<br/>• Resolves hierarchical role graphs and multi-tenant isolation.<br/>• Evaluates fail-closed / fail-open circuit breakers on remote PDP outages. |
 | **PIP**<br/>(Policy Information Point) | [`IdentityBridge`](src/langchain_security_extension/security_core/identity.py)<br/>[`EntityAttributeResolverSPI`](src/langchain_security_extension/security_core/registry.py) | • Converts inbound JWT/OAuth claims into immutable `SecurityIdentity`.<br/>• Injects identity into LangChain's native `RunnableConfig`.<br/>• Resolves dynamic entity attributes (e.g. server owner, user dept) for CEL rules. |
 | **PAP**<br/>(Policy Administration Point) | Declarative Decorators & CEL Expressions | • Declarative `@secured_tool` parameters (`required_roles`, `min_clearance`).<br/>• Common Expression Language rules evaluated over live arguments.<br/>• Metadata classification schemas (`sec.clearance`, `sec.department`). |
@@ -270,13 +269,13 @@ Ready to adopt `langchain-security-extension` in your organization?
 2. 📘 **[Enterprise Implementation Guide](https://prashantdev.github.io/langchain-security-extension/guides/)**  
    The complete 12-chapter guide to rolling out deterministic security in production—covering Identity Provider (IdP) wiring, CEL & OPA policy authoring, RAG metadata signing, DLP sanitization, and SIEM telemetry.
 
-3. 📚 **[API Reference](docs/api/modules.rst)**  
+3. 📚 **[API Reference](docs/api/index.html)**  
    Detailed module specifications for `security_core`, `security_adapter_langchain`, and `security_pdp_opa`.
 
 4. 🧪 **[Companion Reference Application: Enterprise IT Incident Assistant](https://github.com/prashantdev/langchain-enterprise-incident-assistant)**  
    The live demonstrator codebase used throughout the implementation guide to illustrate a real-world migration from fragile prompt guardrails to deterministic enforcement:
    - **Unhardened baseline (`master` branch):** Demonstrates real prompt injection vulnerabilities, bypassing standard LLM system prompts and causing unauthorized tool calls.
-   - **Hardened implementation (`secured3` branch):** Shows the complete, production-grade integration of `langchain-security-extension` following the implementation guide.
+   - **Hardened implementation (`secured` branch):** Shows the complete, production-grade integration of `langchain-security-extension` following the implementation guide.
    - **Automated verification suites:** Run `./run-security-suite.sh --suite basic` and `./run-security-suite.sh --suite guardrail` to verify defenses and audit streaming in action.
 
 ---

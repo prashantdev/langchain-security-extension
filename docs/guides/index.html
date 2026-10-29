@@ -37,7 +37,7 @@
         <td>
             <p>Integrating GenAI agents into your enterprise workflow is a multi-level exercise in security. The <code>langchain-security-extension</code> library is designed as a non-invasive, modular security layer that slips between your existing application services, LangChain execution flows, and downstream enterprise resources. It bridges your current Identity Provider (IdP), role-based access control (RBAC) databases, vector databases, and enterprise logging platforms (SIEM) directly into LangChain components.</p>
             <p>This guide provides a practical, step-by-step roadmap for architects and lead engineers to harden their own enterprise applications with minimal disruption. Rather than discussing security in the abstract, each chapter uses a concrete reference application—an Enterprise IT Incident &amp; Service Desk Assistant (<code>langchain-enterprise-incident-assistant</code>)—as a working example to illustrate how to implement each boundary.</p>
-            <p>Throughout each chapter, you will trace how a working application with standard perimeter security (the <code>master</code> branch) is incrementally transformed into a hardened, zero-trust system (the <code>secured3</code> branch, captured in <code>master..secured3.diff</code>)—demonstrating how to inject caller identity into execution runnables, enforce fine-grained Common Expression Language (CEL) tool constraints, securely filter runbook retrieval, and stream structured audit events into enterprise SIEMs.</p>
+            <p>Throughout each chapter, you will trace how a working application with standard perimeter security (the <code>master</code> branch) is incrementally transformed into a hardened, zero-trust system (the <code>secured</code> branch — demonstrating how to inject caller identity into execution runnables, enforce fine-grained Common Expression Language (CEL) tool constraints, securely filter runbook retrieval, and stream structured audit events into enterprise SIEMs.</p>
         </td>
         <td>
             <div class="callout-card">
@@ -45,7 +45,7 @@
                 Application: <code>langchain-enterprise-incident-assistant</code> (FastAPI + LangChain)
                 <ul>
                     <li><code>master</code> branch: Baseline enterprise deployment using standard perimeter Bearer JWTs, an in-memory user registry, and manual authorization checks in Python code.</li>
-                    <li><code>secured3</code> branch: The hardened production target utilizing this library's <code>@secured_tool</code> guards, <code>SecureRetriever</code> envelope validation, <code>EmbeddedPolicyEngine</code> role DAGs, and real-time SIEM audit streaming (see <code>master..secured3.diff</code>).</li>
+                    <li><code>secured</code> branch: The hardened production target utilizing this library's <code>@secured_tool</code> guards, <code>SecureRetriever</code> envelope validation, <code>EmbeddedPolicyEngine</code> role DAGs, and real-time SIEM audit streaming.</li>
                 </ul>
             </div>
         </td>
