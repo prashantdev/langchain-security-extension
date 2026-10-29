@@ -263,20 +263,23 @@ sequenceDiagram
 
 Ready to adopt `langchain-security-extension` in your organization?
 
-1. 🌐 **[Documentation Hub](https://prashantdev.github.io/langchain-security-extension/)**  
+1. 🚀 **[Quickstart Walkthrough: "Seeing is Believing"](https://prashantdev.github.io/langchain-security-extension/guides/0.%20Quickstart%20Walkthrough.html)**  
+   Hands-on setup guide walking through setting up the library, cloning the demo app, running test suites on unhardened (`main`) vs hardened (`secured`) branches, and exploring the complete 46-test catalog.
+
+2. 🌐 **[Documentation Hub](https://prashantdev.github.io/langchain-security-extension/)**  
    The central documentation portal covering architecture overviews, zero-trust patterns, and library index.
 
-2. 📘 **[Enterprise Implementation Guide](https://prashantdev.github.io/langchain-security-extension/guides/)**  
+3. 📘 **[Enterprise Implementation Guide](https://prashantdev.github.io/langchain-security-extension/guides/)**  
    The complete 12-chapter guide to rolling out deterministic security in production—covering Identity Provider (IdP) wiring, CEL & OPA policy authoring, RAG metadata signing, DLP sanitization, and SIEM telemetry.
 
-3. 📚 **[API Reference](docs/api/index.html)**  
+4. 📚 **[API Reference](docs/api/index.html)**  
    Detailed module specifications for `security_core`, `security_adapter_langchain`, and `security_pdp_opa`.
 
-4. 🧪 **[Companion Reference Application: Enterprise IT Incident Assistant](https://github.com/prashantdev/langchain-enterprise-incident-assistant)**  
+5. 🧪 **[Companion Reference Application: Enterprise IT Incident Assistant](https://github.com/prashantdev/langchain-enterprise-incident-assistant)**  
    The live demonstrator codebase used throughout the implementation guide to illustrate a real-world migration from fragile prompt guardrails to deterministic enforcement:
-   - **Unhardened baseline (`master` branch):** Demonstrates real prompt injection vulnerabilities, bypassing standard LLM system prompts and causing unauthorized tool calls.
+   - **Unhardened baseline (`main` branch):** Demonstrates real prompt injection vulnerabilities, bypassing standard LLM system prompts and causing unauthorized tool calls.
    - **Hardened implementation (`secured` branch):** Shows the complete, production-grade integration of `langchain-security-extension` following the implementation guide.
-   - **Automated verification suites:** Run `./run-security-suite.sh --suite basic` and `./run-security-suite.sh --suite guardrail` to verify defenses and audit streaming in action.
+   - **Automated verification suites:** Run `./run-security-suite.sh --suite basic` and `./run-security-suite.sh --suite guardrail` to verify defenses and audit streaming in action. Check out the [Quickstart Walkthrough](https://prashantdev.github.io/langchain-security-extension/guides/0.%20Quickstart%20Walkthrough.html) for full step-by-step instructions.
 
 ---
 

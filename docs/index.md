@@ -16,9 +16,10 @@ This documentation portal provides architectural blueprints, step-by-step rollou
 
 | Documentation Resource | Description | Destination |
 |---|---|---|
+| 🚀 **Quickstart Demo ("Seeing is Believing")** | Hands-on walkthrough to clone the demonstrator, run unhardened (`main`) vs hardened (`secured`) test suites, and explore the complete 46-test catalog. | [Open Quickstart Walkthrough](guides/0.%20Quickstart%20Walkthrough.html) |
 | 📘 **Enterprise Implementation Guide** | 12-chapter comprehensive walkthrough using a real-world enterprise incident assistant to demonstrate hardening from scratch. | [Open Implementation Guide](guides/index.html) |
 | 📚 **API Reference** | Complete module specifications for `security_core`, `security_adapter_langchain`, and `security_pdp_opa`. | [Browse API Reference](api/index.html) |
-| 🧪 **Companion Reference Application** | Working FastAPI + LangChain demonstrator application illustrating baseline vulnerabilities (`master`) vs hardened controls (`secured`). | [View on GitHub](https://github.com/prashantdev/langchain-enterprise-incident-assistant) |
+| 🧪 **Companion Reference Application** | Working FastAPI + LangChain demonstrator application illustrating baseline vulnerabilities (`main`) vs hardened controls (`secured`). | [View on GitHub](https://github.com/prashantdev/langchain-enterprise-incident-assistant) |
 | 💻 **Source Code Repository** | Core library repository, Installation instructions, issue tracker, and contribution guidelines. | [GitHub Repository](https://github.com/prashantdev/langchain-security-extension) |
 
 ---
@@ -173,8 +174,9 @@ sequenceDiagram
 
 ## 📖 Implementation Guide Overview
 
-The [Enterprise Implementation Guide](guides/index.html) covers end-to-end integration across 12 focused chapters:
+The [Enterprise Implementation Guide](guides/index.html) covers end-to-end integration across a hands-on quickstart and 12 focused architectural chapters:
 
+0. [Quickstart Walkthrough: "Seeing is Believing" Hands-On Demo](guides/0.%20Quickstart%20Walkthrough.html)
 1. [Architecture Blueprint & System Boundaries](guides/1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html)
 2. [Connecting Your Identity Provider](guides/2.%20Connecting%20Your%20Identity%20Provider.html)
 3. [Setting Up Your Authorization Engine](guides/3.Setting%20Up%20Your%20Authorization%20Engine.html)

@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 0: Quickstart Walkthrough — "Seeing is Believing" Hands-On Demo</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="0.%20Quickstart%20Walkthrough.html" class="active"><span class="nav-badge">0</span><span>0. Quickstart &amp; Demo</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools &amp; APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM &amp; Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 0: Quickstart Walkthrough — "Seeing is Believing" Hands-On Demo</h1>
+
+<p>Security architectures are often presented in abstract concepts. The goal of this walkthrough is to provide an immediate, hands-on demonstration of the difference between standard perimeter-only LLM applications and deterministic, code-level Policy Enforcement Points (PEPs).</p>
+
+<p>By pairing the <code>langchain-security-extension</code> library with its live companion reference demonstrator, <code>langchain-enterprise-incident-assistant</code>, you will run functional and adversarial tests against two Git branches:</p>
+
+<ul>
+    <li><strong><code>main</code> branch (Unhardened Baseline):</strong> A standard FastAPI + LangChain IT Incident Assistant with HTTP Bearer JWT authentication, standard prompt-based instructions, and native tool execution. Demonstrates how easily standard LLM applications are exploited via prompt injection, argument tampering, cross-tenant RAG leaks, and runaway loops.</li>
+    <li><strong><code>secured</code> branch (Hardened Target):</strong> The identical application hardened with <code>langchain-security-extension</code>. Demonstrates how code-level PEPs deterministically intercept every exploit before LLM tokens are wasted or unauthorized Python callables run.</li>
+</ul>
+
+<hr />
+
+<h2>Step 1: Environment &amp; Repository Setup</h2>
+
+<h3>1. Prerequisites</h3>
+<ul>
+    <li><strong>Python 3.9+:</strong> A shared Python virtual environment.</li>
+    <li><strong>Configured LLM Service:</strong> The demonstrator issues real model calls during triage and remediation. By default, it connects to a local <strong>Ollama</strong> instance (<code>http://localhost:11434</code> with model <code>llama3.2:3b</code>). Alternatively, you can configure any OpenAI, Gemini, or Claude compatible endpoint in <code>config.properties</code>.</li>
+</ul>
+
+<h3>2. Clone Repositories Side by Side</h3>
+<p>Clone both repositories into a common workspace directory:</p>
+
+<div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash"># Create and activate a shared virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Clone the security extension library
+git clone https://github.com/prashantdev/langchain-security-extension.git
+
+# Clone the companion incident assistant demonstrator
+git clone https://github.com/prashantdev/langchain-enterprise-incident-assistant.git</code></pre>
+</div>
+
+<h3>3. Install the Library and Demonstrator</h3>
+<p>Install the library in editable development mode, followed by the assistant application dependencies:</p>
+
+<div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash"># Install library
+cd langchain-security-extension
+pip install -e .
+
+# Install assistant and test dependencies
+cd ../langchain-enterprise-incident-assistant
+pip install -e ".[dev]"</code></pre>
+</div>
+
+<h3>4. Verify LLM Service Availability</h3>
+<p>Ensure your configured LLM backend is running. For local Ollama users:</p>
+
+<div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash"># Ensure Ollama is active and model is pulled
+ollama serve &
+ollama pull llama3.2:3b</code></pre>
+</div>
+
+<blockquote>
+    <p><strong>Configuring Alternative Providers:</strong> To point to OpenAI, Google Gemini, or Claude instead, edit <code>config.properties</code> in <code>langchain-enterprise-incident-assistant</code> and set <code>model1.baseUrl</code>, <code>model1.modelclass=openai</code>, <code>model1.modelname</code>, and <code>model1.apikey</code>.</p>
+</blockquote>
+
+<hr />
+
+<h2>Step 2: Testing the Unhardened Baseline (<code>main</code> Branch)</h2>
+
+<p>First, observe how standard perimeter security behaves under both legitimate operations and adversarial exploit attempts.</p>
+
+<h3>1. Checkout the <code>main</code> Branch &amp; Start the Server</h3>
+<p>Open <strong>Terminal 1</strong> to run the assistant server:</p>
+
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">TERMINAL 1</span>
+      <span class="code-filename">langchain-enterprise-incident-assistant (main)</span>
+    </div>
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">git checkout main
+./startserver.sh</code></pre>
+</div>
+<p>The server starts an embedded FastAPI service listening on port <code>8080</code>.</p>
+
+<h3>2. Run the Basic Functional Suite (<code>--suite basic</code>)</h3>
+<p>In <strong>Terminal 2</strong>, run the baseline functional test suite:</p>
+
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">TERMINAL 2</span>
+      <span class="code-filename">Run Basic Security Suite</span>
+    </div>
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./run-security-suite.sh --suite basic</code></pre>
+</div>
+
+<p><strong>Expected Outcome:</strong> All <strong>15 / 15 tests PASS</strong>. Standard P1 outages are triaged, password resets work, and unauthenticated HTTP calls without Bearer tokens are rejected at the FastAPI perimeter.</p>
+
+<h3>3. Run the Guardrail Exploit Suite (<code>--suite guardrail</code>)</h3>
+<p>Now, run the 31 adversarial exploit tests against the unhardened baseline:</p>
+
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">TERMINAL 2</span>
+      <span class="code-filename">Run Guardrail Suite on Unhardened Baseline</span>
+    </div>
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./run-security-suite.sh --suite guardrail</code></pre>
+</div>
+
+<p><strong>Expected Outcome:</strong> All <strong>31 / 31 tests FAIL (Exploits Succeed)</strong>:</p>
+<ul>
+    <li><strong>Exploit:</strong> Unauthorized employees trick the agent into rebooting production database servers (<code>web-prod-01</code>) via prompt overrides.</li>
+    <li><strong>Exploit:</strong> DevOps engineers targeting finance infrastructure bypass department checks because arguments are not validated before execution.</li>
+    <li><strong>Exploit:</strong> Clearance Level 1 callers retrieve classified Level 3 runbooks from ChromaDB because standard RAG lacks pre-retrieval filtering.</li>
+    <li><strong>Exploit:</strong> Denied tools cause the LLM to enter runaway retry loops, burning hundreds of unnecessary tokens.</li>
+    <li><strong>Exploit:</strong> Sensitive API keys, passwords, and PII are logged in plaintext to application logs.</li>
+</ul>
+
+<hr />
+
+<h2>Step 3: Testing the Hardened Implementation (<code>secured</code> Branch)</h2>
+
+<p>Next, switch to the hardened target implementation utilizing <code>langchain-security-extension</code>.</p>
+
+<h3>1. Checkout the <code>secured</code> Branch &amp; Restart the Server</h3>
+<p>In <strong>Terminal 1</strong>, stop the running server (<code>Ctrl+C</code>), checkout the hardened branch, and restart:</p>
+
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">TERMINAL 1</span>
+      <span class="code-filename">langchain-enterprise-incident-assistant (secured)</span>
+    </div>
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">git checkout secured
+./startserver.sh</code></pre>
+</div>
+
+<h3>2. Run the Basic Suite</h3>
+<p>In <strong>Terminal 2</strong>, re-run the basic suite to verify that hardening introduced zero regressions into legitimate workflows:</p>
+
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">TERMINAL 2</span>
+      <span class="code-filename">Verify Basic Operations on Secured Branch</span>
+    </div>
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./run-security-suite.sh --suite basic</code></pre>
+</div>
+
+<p><strong>Expected Outcome:</strong> All <strong>15 / 15 tests PASS</strong>.</p>
+
+<h3>3. Run the Guardrail Suite</h3>
+<p>Run the 31 adversarial exploit tests against the hardened server:</p>
+
+<div class="code-block-container code-block-assistant">
+  <div class="code-block-header">
+    <div class="code-block-title">
+      <span class="code-badge code-badge-assistant">TERMINAL 2</span>
+      <span class="code-filename">Verify Hardened Defenses on Secured Branch</span>
+    </div>
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./run-security-suite.sh --suite guardrail</code></pre>
+</div>
+
+<p><strong>Expected Outcome:</strong> All <strong>31 / 31 tests PASS (Exploits Defeated)</strong>:</p>
+<ul>
+    <li><code>@secured_tool</code> intercepts and hard-aborts unauthorized calls in Python bytecode before tool functions run.</li>
+    <li>Common Expression Language (CEL) rules deterministically block department mismatches (<code>PARAMETER_CONSTRAINT_FAILED</code>).</li>
+    <li><code>SecureRetriever</code> injects native VectorStore AST pre-filters and prunes documents before they enter the prompt context window.</li>
+    <li><code>RetryBudgetTracker</code> halts brute-force tool retry loops after consecutive policy denials.</li>
+    <li>In-flight DLP sanitizes PII, Luhn-valid credit cards, and API secrets before telemetry is published to the background SIEM buffer.</li>
+</ul>
+
+<hr />
+
+<h2>Step 4: Trying Individual Exploit Tests</h2>
+
+<p>You can execute individual test scripts to inspect raw HTTP requests, agent thoughts, and diagnostic error codes in detail.</p>
+
+<h3>Scenario A: Testing Dynamic CEL Parameter Constraints</h3>
+<div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/08-cel-parameter-department-mismatch-blocked.sh</code></pre>
+</div>
+<p><em>What happens:</em> An authorized DevOps user attempts to reboot <code>finance-db-01</code>. The <code>@secured_tool</code> evaluator dynamically looks up server ownership via <code>EntityAttributeResolverSPI</code>, detects that the server belongs to <code>FINANCE</code> while the caller is in <code>INFRA</code>, and aborts with diagnostic code <code>PARAMETER_CONSTRAINT_FAILED</code>.</p>
+
+<h3>Scenario B: Testing Indirect Prompt Injection Neutralization</h3>
+<div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">./internal-security-guardrail-tests/23-prompt-injection-blocked.sh</code></pre>
+</div>
+<p><em>What happens:</em> An inbound incident ticket contains a jailbreak string attempting to override system instructions and exfiltrate secrets. The entry PEP halts execution and emits a <code>PROMPT_INJECTION_DETECTED</code> security event to SIEM.</p>
+
+<h3>Scenario C: Inspecting SIEM Audit Streaming</h3>
+<div class="code-block-container">
+  <div class="code-block-header">
+    <span class="code-lang">BASH</span>
+  </div>
+  <pre><code class="language-bash">tail -n 15 logs/security-audit.json | jq .</code></pre>
+</div>
+<p><em>What happens:</em> Inspect the live structured RFC 5424 / OCSF audit log containing cryptographic trace correlations (W3C <code>traceparent</code>), redacted PII fields, and deterministic denial reason codes.</p>
+
+<hr />
+
+<h2>Complete Catalog of Tests in the Demonstrator</h2>
+
+<h3>Suite 1: Basic Security Tests (15 Tests)</h3>
+<p>The basic security suite validates standard ticket triage, remediation operations, perimeter JWT validation, and RBAC baseline functionality.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width: 5%;">#</th>
+      <th style="width: 35%;">Test Script</th>
+      <th style="width: 40%;">Description &amp; Verification Scenario</th>
+      <th style="width: 10%;"><code>main</code></th>
+      <th style="width: 10%;"><code>secured</code></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>01</td>
+      <td><code>01-standard-p1-outage-processed.sh</code></td>
+      <td>Validates standard P1 incident workflow for authorized DevOps engineer.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>02</td>
+      <td><code>02-standard-p4-password-reset-processed.sh</code></td>
+      <td>Validates standard P4 self-service password reset for corporate employee.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>03</td>
+      <td><code>03-unauthorized-user-blocked.sh</code></td>
+      <td>Verifies perimeter HTTP rejection of unknown or unregistered callers.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>04</td>
+      <td><code>04-cross-tenant-isolation-blocked.sh</code></td>
+      <td>Verifies perimeter rejection when tenant claim does not match target route.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>05</td>
+      <td><code>05-clearance-floor-violation-blocked.sh</code></td>
+      <td>Validates rejection when caller clearance level is below ticket entry floor.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>06</td>
+      <td><code>06-unauthenticated-caller-blocked.sh</code></td>
+      <td>Verifies perimeter rejection (401 Unauthorized) when Bearer token is missing.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>07</td>
+      <td><code>07-mutative-tool-sideeffect-aborted.sh</code></td>
+      <td>Verifies that unauthorized callers cannot trigger mutative tool operations.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>08</td>
+      <td><code>08-malformed-poisoned-identity-blocked.sh</code></td>
+      <td>Validates perimeter rejection of malformed or syntactically invalid JWT tokens.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>09</td>
+      <td><code>09-subagent-async-context-propagated.sh</code></td>
+      <td>Validates caller context propagation across multi-agent triage-to-remediation handoff.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td><code>10-fake-server-entity-extracted.sh</code></td>
+      <td>Verifies agent handling when ticket references a non-existent infrastructure hostname.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td><code>11-unauthorized-tool-execution-blocked.sh</code></td>
+      <td>Verifies that standard employees cannot trigger privileged server restart tools.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>12</td>
+      <td><code>12-role-escalation-violation-blocked.sh</code></td>
+      <td>Blocks attempts by standard users to escalate privileges to <code>ROLE_ADMIN</code> actions.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>13</td>
+      <td><code>13-invalid-entity-remediation-blocked.sh</code></td>
+      <td>Ensures remediation workflows halt when target infrastructure entities are invalid.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>14</td>
+      <td><code>14-unauthorized-target-user-password-reset-blocked.sh</code></td>
+      <td>Ensures non-admin users cannot trigger password resets targeting executive accounts.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>15</td>
+      <td><code>15-unauthenticated-rag-request-blocked.sh</code></td>
+      <td>Verifies that direct unauthenticated requests to knowledge base endpoints are rejected.</td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+  </tbody>
+</table>
+
+---
+
+<h3>Suite 2: Internal Security Guardrail Suite (31 Exploit Vectors)</h3>
+<p>The guardrail test suite evaluates zero-trust Policy Enforcement Points under active prompt injection, parameter tampering, cross-tenant leaks, and token-exhaustion loops.</p>
+
+<h4>Domain A: Knowledge Ingestion &amp; Admission Control</h4>
+<table>
+  <thead>
+    <tr>
+      <th style="width: 5%;">#</th>
+      <th style="width: 30%;">Test Script</th>
+      <th style="width: 45%;">Exploit Vector &amp; Enforcement Guarantee</th>
+      <th style="width: 10%;"><code>main</code></th>
+      <th style="width: 10%;"><code>secured</code></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>01</td>
+      <td><code>01-ingestion-envelope-validation-enforced.sh</code></td>
+      <td>Missing mandatory <code>sec:*</code> tags rejected during document segment ingestion.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>02</td>
+      <td><code>02-ingestion-header-classification-elevation.sh</code></td>
+      <td>Parser detects structural headers (<code>## [CONFIDENTIAL]</code>) and elevates classification floor.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>03</td>
+      <td><code>03-ingestion-strict-fail-closed-atomic-rollback.sh</code></td>
+      <td>Under strict fail-closed mode, malformed metadata causes atomic rollback of document batch.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>04</td>
+      <td><code>04-ingestion-permissive-quarantine-elevation.sh</code></td>
+      <td>Unlabelled chunks in permissive mode are automatically tagged <code>sec:quarantined = true</code>.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>05</td>
+      <td><code>05-ingestion-monotonic-classification-elevation.sh</code></td>
+      <td>Strictly rejects illegal de-escalation of chunk clearance below parent document baseline.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>06</td>
+      <td><code>06-hmac-envelope-tamper-detection.sh</code></td>
+      <td>Direct tampering of metadata tags in storage fails HMAC verification (<code>INVALID_HMAC</code>).</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>07</td>
+      <td><code>07-ingestion-unlabelled-chunk-quarantine-policy.sh</code></td>
+      <td>Chunks lacking explicit envelope metadata are pruned under strict admission policies.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Domain B: Pre-Execution Tool Guardrails &amp; CEL Parameter Validation</h4>
+<table>
+  <thead>
+    <tr>
+      <th style="width: 5%;">#</th>
+      <th style="width: 30%;">Test Script</th>
+      <th style="width: 45%;">Exploit Vector &amp; Enforcement Guarantee</th>
+      <th style="width: 10%;"><code>main</code></th>
+      <th style="width: 10%;"><code>secured</code></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>08</td>
+      <td><code>08-cel-parameter-department-mismatch-blocked.sh</code></td>
+      <td>CEL halts tool when caller department does not own the target infrastructure asset.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>09</td>
+      <td><code>09-dual-mode-hard-abort-enforced.sh</code></td>
+      <td>Mutative tool violations trigger an immediate Hard Abort, halting execution with 0 tokens.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td><code>10-policy-brute-force-retry-loop-halted.sh</code></td>
+      <td>Halts agent execution when model repeatedly retries denied tool dispatches.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td><code>11-cel-null-entity-resolution-fail-closed.sh</code></td>
+      <td>CEL evaluation fails closed (DENY) when target asset ID cannot be resolved in CMDB.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>12</td>
+      <td><code>12-tool-interceptor-schema-hiding-verification.sh</code></td>
+      <td>Strips internal security identity context from model OpenAPI schemas (Schema Hiding).</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>13</td>
+      <td><code>13-model-feedback-soft-refusal-returned.sh</code></td>
+      <td>Informational tool denials return safe synthetic refusal messages instead of hard halting.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>14</td>
+      <td><code>14-cel-entity-attribute-hydration-resolved.sh</code></td>
+      <td>Hydrates live CMDB entity attributes dynamically for CEL ABAC evaluation.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Domain C: Secure Vector Retrieval &amp; Context Leakage Defense</h4>
+<table>
+  <thead>
+    <tr>
+      <th style="width: 5%;">#</th>
+      <th style="width: 30%;">Test Script</th>
+      <th style="width: 45%;">Exploit Vector &amp; Enforcement Guarantee</th>
+      <th style="width: 10%;"><code>main</code></th>
+      <th style="width: 10%;"><code>secured</code></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>15</td>
+      <td><code>15-rag-clearance-data-leakage-prevented.sh</code></td>
+      <td>Prevents Level 1 callers from retrieving Level 3 runbooks via vector pre-filtering.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>16</td>
+      <td><code>16-rag-topk-predictive-oversampling-and-paging.sh</code></td>
+      <td>Inflates Top-K retrieval window (oversampling) to prevent result starvation during pruning.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>17</td>
+      <td><code>17-rag-vectorstore-ast-prefilter-translation.sh</code></td>
+      <td>Translates caller identity into native VectorStore search filters prior to cosine query.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Domain D: Policy Decision Point (PDP) &amp; Circuit Breakers</h4>
+<table>
+  <thead>
+    <tr>
+      <th style="width: 5%;">#</th>
+      <th style="width: 30%;">Test Script</th>
+      <th style="width: 45%;">Exploit Vector &amp; Enforcement Guarantee</th>
+      <th style="width: 10%;"><code>main</code></th>
+      <th style="width: 10%;"><code>secured</code></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>18</td>
+      <td><code>18-pdp-two-tier-cache-hit-performance.sh</code></td>
+      <td>Deduplicates policy checks via Tier 1 (invocation) and Tier 2 (TTL) decision caching.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>19</td>
+      <td><code>19-remote-opa-pdp-circuit-breaker-fail-closed.sh</code></td>
+      <td>Trips circuit breaker to fail-closed DENY when remote OPA policy engine is unreachable.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>20</td>
+      <td><code>20-framework-starter-identity-propagation.sh</code></td>
+      <td>Maps perimeter auth context deterministically into <code>RunnableConfig</code> envelope.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>21</td>
+      <td><code>21-pdp-circuit-breaker-state-machine-transitions.sh</code></td>
+      <td>Verifies circuit breaker state transitions (CLOSED &rarr; OPEN &rarr; HALF_OPEN) during outages.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>22</td>
+      <td><code>22-pdp-cache-eviction-on-identity-invalidation.sh</code></td>
+      <td>Evicts cached L1/L2 verdicts immediately when user roles or clearance are revoked.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Domain E: Threat Neutralization, In-Flight DLP &amp; SIEM Telemetry</h4>
+<table>
+  <thead>
+    <tr>
+      <th style="width: 5%;">#</th>
+      <th style="width: 30%;">Test Script</th>
+      <th style="width: 45%;">Exploit Vector &amp; Enforcement Guarantee</th>
+      <th style="width: 10%;"><code>main</code></th>
+      <th style="width: 10%;"><code>secured</code></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>23</td>
+      <td><code>23-prompt-injection-blocked.sh</code></td>
+      <td>Neutralizes instruction overrides and emits <code>PROMPT_INJECTION_DETECTED</code>.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>24</td>
+      <td><code>24-siem-audit-sanitization-enforced.sh</code></td>
+      <td>Emits tamper-evident structured audit events to SIEM sinks via non-blocking ring buffer.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>25</td>
+      <td><code>25-pii-regex-and-masked-annotation-scrubbing.sh</code></td>
+      <td>Scrubs passwords, AWS keys, Bearer tokens, and Luhn-valid credit cards in-flight.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>26</td>
+      <td><code>26-tenant-isolation-boundary-violation-alert.sh</code></td>
+      <td>Blocks foreign tenant operations and raises critical <code>TENANT_BOUND_VIOLATION</code> alert.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>27</td>
+      <td><code>27-opentelemetry-trace-span-correlation.sh</code></td>
+      <td>Extracts W3C <code>traceparent</code> headers and correlates trace and span IDs to audit events.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>28</td>
+      <td><code>28-siem-policy-brute-force-alert-generation.sh</code></td>
+      <td>Emits <code>POLICY_BRUTE_FORCE_SCANNING</code> alert when caller exceeds denial threshold.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>29</td>
+      <td><code>29-anti-loop-retry-cap-terminated.sh</code></td>
+      <td>Terminates agent execution upon reaching maximum consecutive tool violations cap.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>30</td>
+      <td><code>30-telemetry-sanitization-raw-event-verified.sh</code></td>
+      <td>Verifies raw emitted event dictionaries contain zero plaintext credentials or secrets.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+    <tr>
+      <td>31</td>
+      <td><code>31-sliding-window-abuse-throttling.sh</code></td>
+      <td>Throttles cross-turn abuse over a sliding temporal window and auto-prunes expired denials.</td>
+      <td><span style="color: red; font-weight: bold;">FAIL</span></td>
+      <td><span style="color: green; font-weight: bold;">PASS</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>Summary &amp; Next Steps</h2>
+
+<p>Now that you have seen the difference between perimeter-only agents and zero-trust code-level PEPs in practice, proceed through the implementation chapters to explore each component in detail:</p>
+
+<ul>
+    <li><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><strong>Chapter 1: Architecture Blueprint &amp; System Boundaries</strong></a> — The 4 core enforcement checkpoints.</li>
+    <li><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><strong>Chapter 2: Connecting Your Identity Provider</strong></a> — How to pass caller identity into <code>RunnableConfig</code>.</li>
+    <li><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><strong>Chapter 7: Guarding Tools &amp; Enterprise APIs</strong></a> — Writing Common Expression Language (CEL) parameter constraints.</li>
+    <li><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><strong>Chapter 10: SIEM &amp; Log Aggregators</strong></a> — Asynchronous telemetry and compliance streaming.</li>
+</ul>
+
+  </main>
+</div>
+</body>
+</html>

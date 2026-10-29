@@ -15,6 +15,7 @@
       </div>
       <ul class="nav-menu">
         <li class="nav-item"><a href="index.html" class="active"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="0.%20Quickstart%20Walkthrough.html"><span class="nav-badge">0</span><span>0. Quickstart &amp; Demo</span></a></li>
         <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
         <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
         <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
@@ -37,14 +38,14 @@
         <td>
             <p>Integrating GenAI agents into your enterprise workflow is a multi-level exercise in security. The <code>langchain-security-extension</code> library is designed as a non-invasive, modular security layer that slips between your existing application services, LangChain execution flows, and downstream enterprise resources. It bridges your current Identity Provider (IdP), role-based access control (RBAC) databases, vector databases, and enterprise logging platforms (SIEM) directly into LangChain components.</p>
             <p>This guide provides a practical, step-by-step roadmap for architects and lead engineers to harden their own enterprise applications with minimal disruption. Rather than discussing security in the abstract, each chapter uses a concrete reference application—an Enterprise IT Incident &amp; Service Desk Assistant (<code>langchain-enterprise-incident-assistant</code>)—as a working example to illustrate how to implement each boundary.</p>
-            <p>Throughout each chapter, you will trace how a working application with standard perimeter security (the <code>master</code> branch) is incrementally transformed into a hardened, zero-trust system (the <code>secured</code> branch — demonstrating how to inject caller identity into execution runnables, enforce fine-grained Common Expression Language (CEL) tool constraints, securely filter runbook retrieval, and stream structured audit events into enterprise SIEMs.</p>
+            <p>Throughout each chapter, you will trace how a working application with standard perimeter security (the <code>main</code> branch) is incrementally transformed into a hardened, zero-trust system (the <code>secured</code> branch) — demonstrating how to inject caller identity into execution runnables, enforce fine-grained Common Expression Language (CEL) tool constraints, securely filter runbook retrieval, and stream structured audit events into enterprise SIEMs.</p>
         </td>
         <td>
             <div class="callout-card">
                 <h4>Reference Implementation Repository:</h4>
                 Application: <code>langchain-enterprise-incident-assistant</code> (FastAPI + LangChain)
                 <ul>
-                    <li><code>master</code> branch: Baseline enterprise deployment using standard perimeter Bearer JWTs, an in-memory user registry, and manual authorization checks in Python code.</li>
+                    <li><code>main</code> branch: Baseline enterprise deployment using standard perimeter Bearer JWTs, an in-memory user registry, and manual authorization checks in Python code.</li>
                     <li><code>secured</code> branch: The hardened production target utilizing this library's <code>@secured_tool</code> guards, <code>SecureRetriever</code> envelope validation, <code>EmbeddedPolicyEngine</code> role DAGs, and real-time SIEM audit streaming.</li>
                 </ul>
             </div>
@@ -54,7 +55,9 @@
 
 
 <h2>Table of Contents</h2>
-<ol>
+<ol start="0">
+    <li><a href="0.%20Quickstart%20Walkthrough.html"><strong> Quickstart Walkthrough: "Seeing is Believing" Hands-On Demo &amp; Test Catalog</strong></a></br>
+    <em>Overview:</em> Set up the library and demonstrator side-by-side, launch the assistant server, and compare exploit behaviors directly between the unhardened <code>main</code> branch (vulnerable to prompt injection, argument tampering, and runaway loops) and the hardened <code>secured</code> branch (100% deterministic bytecode interception). Includes complete 46-test catalog.</li>
     <li><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><strong> Architecture Blueprint &amp; System Boundaries</strong></a></br>
     <em>Overview:</em> Understand how the library acts as an inline security checkpoint (Policy Enforcement Point or PEP) between your users, LangChain workflows, and data sources without relying on fragile thread-local variables.</li>
     <li><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><strong> Connecting Your Identity Provider: Passing User Credentials into LangChain</strong></a></br>
