@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chapter 13: Unified Configuration Reference</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2 class="sidebar-title">Implementation Guide</h2>
+        <p class="sidebar-subtitle">Securing LangChain in Enterprise</p>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item"><a href="index.html"><span class="nav-badge">Home</span><span>Overview</span></a></li>
+        <li class="nav-item"><a href="0.%20Quickstart%20Walkthrough.html"><span class="nav-badge">0</span><span>0. Quickstart &amp; Demo</span></a></li>
+        <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
+        <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
+        <li class="nav-item"><a href="3.%20Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
+        <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
+        <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
+        <li class="nav-item"><a href="7.%20Guarding%20Tools%20and%20Enterprise%20APIs.html"><span class="nav-badge">7</span><span>7. Guarding Tools &amp; APIs</span></a></li>
+        <li class="nav-item"><a href="8.%20Defending%20Against%20Agent%20Looping.html"><span class="nav-badge">8</span><span>8. Defending Agent Looping</span></a></li>
+        <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
+        <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM &amp; Log Aggregators</span></a></li>
+        <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
+        <li class="nav-item"><a href="12.%20Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+        <li class="nav-item"><a href="13.%20Configuration%20Reference.html" class="active"><span class="nav-badge">13</span><span>13. Config Reference</span></a></li>
+      </ul>
+    </aside>
+  <main class="content-wrapper">
+<h1>Chapter 13: Unified Configuration Reference</h1>
+
+<p>The <code>langchain-security-extension</code> framework and its companion applications support deterministic, zero-trust configuration via <strong>declarative Python decorators</strong>, <strong>property configuration files (<code>config.properties</code>)</strong>, and standard <strong>environment variables</strong>.</p>
+
+<p>Every property defined in <code>config.properties</code> can be overridden at deployment time by declaring an uppercase environment variable where dots are replaced by underscores (for example, <code>security.pdp.mode</code> is overridden by <code>SECURITY_PDP_MODE</code>).</p>
+
+<hr />
+
+<h2>1. Policy Decision Point (PDP) &amp; Authorization Engine</h2>
+
+<p>These settings govern whether policy evaluation is performed in-process by the embedded rule engine or delegated to an external service like Open Policy Agent (OPA), as well as remote circuit breaker thresholds.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width: 25%;">Property Key / Env Var</th>
+      <th style="width: 15%;">Type &amp; Values</th>
+      <th style="width: 15%;">Default Value</th>
+      <th style="width: 45%;">Description &amp; Operational Impact</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>security.pdp.mode</code><br /><code>SECURITY_PDP_MODE</code></td>
+      <td>String<br /><code>EMBEDDED</code> | <code>OPA</code></td>
+      <td><code>EMBEDDED</code></td>
+      <td>Selects the primary authorization engine. <code>EMBEDDED</code> evaluates role hierarchies and numeric clearance locally in Python memory with sub-millisecond latency. <code>OPA</code> delegates evaluations to an external REST endpoint.</td>
+    </tr>
+    <tr>
+      <td><code>security.pdp.opa.url</code><br /><code>SECURITY_PDP_OPA_URL</code></td>
+      <td>String (URL)</td>
+      <td><code>http://localhost:8181/v1/data/langchain/security/allow</code></td>
+      <td>The target REST endpoint for Open Policy Agent (or Cedar sidecar) decision queries when <code>security.pdp.mode=OPA</code>.</td>
+    </tr>
+    <tr>
+      <td><code>security.pdp.opa.timeout</code><br /><code>SECURITY_PDP_OPA_TIMEOUT</code></td>
+      <td>Float (Seconds)</td>
+      <td><code>0.05</code> (50ms)</td>
+      <td>HTTP client timeout for remote PDP evaluations. Outages or latency spikes exceeding this threshold immediately record an evaluation failure.</td>
+    </tr>
+    <tr>
+      <td><code>security.pdp.circuitbreaker.threshold</code><br /><code>SECURITY_PDP_CIRCUITBREAKER_THRESHOLD</code></td>
+      <td>Integer</td>
+      <td><code>1</code> (assistant)<br /><code>5</code> (library core)</td>
+      <td>Number of consecutive network timeouts or 5xx errors from the remote PDP that trip the circuit breaker into <code>OPEN</code> state.</td>
+    </tr>
+    <tr>
+      <td><code>security.pdp.circuitbreaker.recovery</code><br /><code>SECURITY_PDP_CIRCUITBREAKER_RECOVERY</code></td>
+      <td>Float (Seconds)</td>
+      <td><code>30.0</code></td>
+      <td>Cooldown window before an <code>OPEN</code> circuit breaker transitions to <code>HALF_OPEN</code> to probe remote PDP recovery. During <code>OPEN</code>, requests fail closed deterministically.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>2. Two-Tier Decision Cache (L1 &amp; L2)</h2>
+
+<p>The library features a two-tier decision caching architecture to avoid redundant evaluations and eliminate token-stage delays.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width: 25%;">Property Key / Env Var</th>
+      <th style="width: 15%;">Type &amp; Values</th>
+      <th style="width: 15%;">Default Value</th>
+      <th style="width: 45%;">Description &amp; Operational Impact</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>security.cache.l1.enabled</code><br /><code>SECURITY_CACHE_L1_ENABLED</code></td>
+      <td>Boolean<br /><code>true</code> | <code>false</code></td>
+      <td><code>true</code></td>
+      <td>Enables Tier 1 invocation-scoped memoization. Decisions are stored directly inside LangChain's <code>RunnableConfig["configurable"]["sec:decision_cache"]</code>, providing zero-lock, thread-agnostic cache hits across all sub-agents and tools within a single request.</td>
+    </tr>
+    <tr>
+      <td><code>security.cache.l2.enabled</code><br /><code>SECURITY_CACHE_L2_ENABLED</code></td>
+      <td>Boolean<br /><code>true</code> | <code>false</code></td>
+      <td><code>true</code></td>
+      <td>Enables Tier 2 cross-request LRU decision caching across multiple invocations for identical caller roles and resources.</td>
+    </tr>
+    <tr>
+      <td><code>security.cache.l2.ttl</code><br /><code>SECURITY_CACHE_L2_TTL</code></td>
+      <td>Float (Seconds)</td>
+      <td><code>60.0</code> (assistant)<br /><code>300.0</code> (library core)</td>
+      <td>Time-to-live for Tier 2 cached verdicts. Automatically invalidated early if caller roles or clearance are revoked via <code>OPACacheInvalidationHandler</code>.</td>
+    </tr>
+    <tr>
+      <td><code>security.cache.l2.maxEntries</code><br /><code>SECURITY_CACHE_L2_MAXENTRIES</code></td>
+      <td>Integer</td>
+      <td><code>1000</code> (assistant)<br /><code>4096</code> (library core)</td>
+      <td>Maximum capacity of the Tier 2 LRU cache. When exceeded, least-recently-used authorization verdicts are pruned.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>3. Tool Interception, Anti-Looping &amp; Abuse Throttling</h2>
+
+<p>Settings governing pre-execution tool parameter validation, retry budgets for soft model feedback, and cross-turn brute-force abuse protection.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width: 25%;">Property Key / Env Var</th>
+      <th style="width: 15%;">Type &amp; Values</th>
+      <th style="width: 15%;">Default Value</th>
+      <th style="width: 45%;">Description &amp; Operational Impact</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>security.retry.maxViolations</code><br /><code>SECURITY_RETRY_MAXVIOLATIONS</code></td>
+      <td>Integer</td>
+      <td><code>3</code> (assistant)<br /><code>2</code> (library core)</td>
+      <td>Maximum number of consecutive policy denials permitted for informational tools before escalating to a <code>HARD_ABORT</code>. Shuts down runaway LLM tool retry loops.</td>
+    </tr>
+    <tr>
+      <td><code>security.abuse.windowSeconds</code><br /><code>SECURITY_ABUSE_WINDOWSECONDS</code></td>
+      <td>Float (Seconds)</td>
+      <td><code>60.0</code></td>
+      <td>Sliding temporal window in seconds used to track denied tool executions per subject across turns.</td>
+    </tr>
+    <tr>
+      <td><code>security.abuse.maxDenials</code><br /><code>SECURITY_ABUSE_MAXDENIALS</code></td>
+      <td>Integer</td>
+      <td><code>3</code></td>
+      <td>Denial cap within <code>security.abuse.windowSeconds</code>. When reached, triggers a critical <code>POLICY_BRUTE_FORCE_SCANNING</code> threat alert in SIEM and throttles execution.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>4. Data Loss Prevention (DLP) &amp; In-Flight PII Redaction</h2>
+
+<p>Governs automated regex masking of sensitive parameters, Luhn-valid credit card numbers, Indian Aadhaar/PAN IDs, passwords, and bearer tokens.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width: 25%;">Property Key / Env Var</th>
+      <th style="width: 15%;">Type &amp; Values</th>
+      <th style="width: 15%;">Default Value</th>
+      <th style="width: 45%;">Description &amp; Operational Impact</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>security.pii.redaction.scope</code><br /><code>SECURITY_PII_REDACTION_SCOPE</code></td>
+      <td>String<br /><code>audit_only</code> | <code>full_in_flight</code> | <code>disabled</code></td>
+      <td><code>audit_only</code></td>
+      <td>
+        <strong><code>audit_only</code>:</strong> Scrubs PII and credentials exclusively before payloads are emitted to SIEM and log aggregators.<br />
+        <strong><code>full_in_flight</code>:</strong> Irreversibly scrubs PII across prompts, tool arguments, tool outputs, RAG chunks, and audit logs.<br />
+        <strong><code>disabled</code>:</strong> Disables automated PII scrubbing.
+      </td>
+    </tr>
+    <tr>
+      <td><code>DEFAULT_REDACTION_TOKEN</code></td>
+      <td>String</td>
+      <td><code>[REDACTED]</code></td>
+      <td>Replacement token substituted in place of detected secrets, credit cards, or PII.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>5. Knowledge Ingestion &amp; Vector Retrieval (RAG) Security</h2>
+
+<p>Controls metadata labeling, cryptographic HMAC verification, and oversampling retrieval behavior for knowledge bases.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width: 25%;">Property Key / Env Var</th>
+      <th style="width: 15%;">Type &amp; Values</th>
+      <th style="width: 15%;">Default Value</th>
+      <th style="width: 45%;">Description &amp; Operational Impact</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>security.ingestion.mode</code><br /><code>SECURITY_INGESTION_MODE</code></td>
+      <td>String<br /><code>STRICT_FAIL_CLOSED</code> | <code>EVERYTHING_CLASSIFIED</code> | <code>EVERYTHING_PUBLIC</code></td>
+      <td><code>STRICT_FAIL_CLOSED</code></td>
+      <td>
+        <strong><code>STRICT_FAIL_CLOSED</code>:</strong> Rejects and rolls back document batches if any chunk lacks mandatory <code>sec:*</code> metadata envelopes.<br />
+        <strong><code>EVERYTHING_CLASSIFIED</code>:</strong> Tags unlabelled chunks as <code>sec:quarantined = true</code> with <code>RESTRICTED</code> classification.<br />
+        <strong><code>EVERYTHING_PUBLIC</code>:</strong> Defaults unlabelled chunks to <code>PUBLIC</code> (clearance 0).
+      </td>
+    </tr>
+    <tr>
+      <td><code>security.hmac.secret</code><br /><code>SECURITY_HMAC_SECRET</code></td>
+      <td>String</td>
+      <td><code>enterprise-hmac-secret-key</code></td>
+      <td>Shared secret key used to compute and verify the HMAC-SHA256 signature in <code>sec:envelope_hash</code>. Prevents direct database tampering of chunk clearance.</td>
+    </tr>
+    <tr>
+      <td><code>security.retriever.oversampling</code><br /><code>SECURITY_RETRIEVER_OVERSAMPLING</code></td>
+      <td>Float</td>
+      <td><code>3.0</code></td>
+      <td>Predictive multiplier ($K_{fetch} = K_{target} \times factor$) applied to vector search candidate windows to guarantee Top-K documents remain after post-retrieval clearance pruning.</td>
+    </tr>
+    <tr>
+      <td><code>DEFAULT_MAX_FETCH_CAP</code></td>
+      <td>Integer</td>
+      <td><code>50</code></td>
+      <td>Absolute upper bound on candidate chunks fetched from the vector store during oversampling.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>6. Multi-Tenancy &amp; Default Identity Attributes</h2>
+
+<p>Fallback identity parameters applied when perimeter tokens lack explicit tenant or organizational claims.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width: 25%;">Property Key / Env Var</th>
+      <th style="width: 15%;">Type &amp; Values</th>
+      <th style="width: 15%;">Default Value</th>
+      <th style="width: 45%;">Description &amp; Operational Impact</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>security.default.tenant</code><br /><code>SECURITY_DEFAULT_TENANT</code></td>
+      <td>String</td>
+      <td><code>CORP_MAIN</code> (assistant)<br /><code>DEFAULT_TENANT</code> (core)</td>
+      <td>Tenant partition assigned when no <code>tenant_id</code> claim is present in caller credentials.</td>
+    </tr>
+    <tr>
+      <td><code>security.default.department</code><br /><code>SECURITY_DEFAULT_DEPARTMENT</code></td>
+      <td>String</td>
+      <td><code>IT_OPS</code> (assistant)<br /><code>GENERAL</code> (core)</td>
+      <td>Department partition assigned when no department attribute is supplied in caller identity.</td>
+    </tr>
+    <tr>
+      <td><code>jwt.secret</code><br /><code>JWT_SECRET</code></td>
+      <td>String</td>
+      <td><code>secret-key</code></td>
+      <td>HMAC secret key used by perimeter authentication filters to sign and verify Bearer JWT tokens.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>7. Audit Telemetry &amp; SIEM Streaming</h2>
+
+<p>Parameters governing non-blocking asynchronous log shipping to enterprise SIEM platforms (Splunk, Elastic, Datadog).</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width: 25%;">Property Key / Env Var</th>
+      <th style="width: 15%;">Type &amp; Values</th>
+      <th style="width: 15%;">Default Value</th>
+      <th style="width: 45%;">Description &amp; Operational Impact</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>DEFAULT_RING_BUFFER_CAPACITY</code></td>
+      <td>Integer</td>
+      <td><code>16384</code></td>
+      <td>Capacity of the in-memory ring buffer for audit events. Background publisher threads drain this buffer asynchronously without adding latency to agent turns.</td>
+    </tr>
+    <tr>
+      <td><code>DEFAULT_PAYLOAD_MAX_CHARS</code></td>
+      <td>Integer</td>
+      <td><code>2048</code></td>
+      <td>Truncation threshold for raw event payload dumps inside emitted audit logs to prevent SIEM message exhaustion.</td>
+    </tr>
+    <tr>
+      <td><code>splunk.hec.url</code><br /><code>SPLUNK_HEC_URL</code></td>
+      <td>String (URL)</td>
+      <td><em>Optional (Empty)</em></td>
+      <td>Splunk HTTP Event Collector (HEC) endpoint URL for direct streaming of RFC 5424 / OCSF audit events.</td>
+    </tr>
+    <tr>
+      <td><code>splunk.token</code><br /><code>SPLUNK_TOKEN</code></td>
+      <td>String</td>
+      <td><em>Optional (Empty)</em></td>
+      <td>Authentication bearer token for Splunk HEC ingestion.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>8. Demonstrator Server &amp; Model Configuration</h2>
+
+<p>These settings configure the host server and language model integrations in <code>langchain-enterprise-incident-assistant</code>.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width: 25%;">Property Key / Env Var</th>
+      <th style="width: 15%;">Type &amp; Values</th>
+      <th style="width: 15%;">Default Value</th>
+      <th style="width: 45%;">Description &amp; Operational Impact</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>server.host</code> / <code>SERVER_HOST</code></td>
+      <td>String</td>
+      <td><code>0.0.0.0</code></td>
+      <td>Host binding interface for the embedded FastAPI server.</td>
+    </tr>
+    <tr>
+      <td><code>server.port</code> / <code>SERVER_PORT</code></td>
+      <td>Integer</td>
+      <td><code>8080</code></td>
+      <td>Listening TCP port for the embedded assistant server.</td>
+    </tr>
+    <tr>
+      <td><code>chroma.url</code> / <code>CHROMA_URL</code></td>
+      <td>String (URL)</td>
+      <td><code>http://localhost:8000</code></td>
+      <td>Target ChromaDB vector database instance URL.</td>
+    </tr>
+    <tr>
+      <td><code>chroma.collection</code> / <code>CHROMA_COLLECTION</code></td>
+      <td>String</td>
+      <td><code>it_runbooks</code></td>
+      <td>ChromaDB collection storing classified IT incident runbooks.</td>
+    </tr>
+    <tr>
+      <td><code>model1.baseUrl</code><br /><code>MODEL1_BASEURL</code></td>
+      <td>String (URL)</td>
+      <td><code>http://localhost:11434</code></td>
+      <td>Base URL of the primary LLM provider (Ollama, OpenAI, Gemini, or Claude).</td>
+    </tr>
+    <tr>
+      <td><code>model1.modelclass</code><br /><code>MODEL1_MODELCLASS</code></td>
+      <td>String<br /><code>ollama</code> | <code>openai</code></td>
+      <td><code>ollama</code></td>
+      <td>ChatModel adapter protocol. Use <code>openai</code> for OpenAI, Gemini Flash (OpenAI compatibility mode), or Claude gateways.</td>
+    </tr>
+    <tr>
+      <td><code>model1.modelname</code><br /><code>MODEL1_MODELNAME</code></td>
+      <td>String</td>
+      <td><code>llama3.2:3b</code></td>
+      <td>Target model identifier passed in API requests.</td>
+    </tr>
+    <tr>
+      <td><code>model1.apikey</code><br /><code>MODEL1_APIKEY</code></td>
+      <td>String</td>
+      <td><em>Optional (Empty)</em></td>
+      <td>API key for commercial providers (OpenAI, Google Gemini, Anthropic).</td>
+    </tr>
+    <tr>
+      <td><code>model1.timeout</code><br /><code>MODEL1_TIMEOUT</code></td>
+      <td>String</td>
+      <td><code>300s</code></td>
+      <td>HTTP client timeout for LLM inferences.</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2>Summary &amp; Related Guides</h2>
+
+<ul>
+    <li><a href="3.%20Setting%20Up%20Your%20Authorization%20Engine.html"><strong>Chapter 3: Setting Up Your Authorization Engine</strong></a> — Detailed OPA vs Embedded setup.</li>
+    <li><a href="8.%20Defending%20Against%20Agent%20Looping.html"><strong>Chapter 8: Defending Against Agent Looping</strong></a> — Fine-tuning retry budgets and abuse windows.</li>
+    <li><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><strong>Chapter 10: Connecting to Enterprise SIEM</strong></a> — Ring buffer and telemetry forwarder architecture.</li>
+    <li><a href="12.%20Troubleshooting.html"><strong>Chapter 12: Troubleshooting &amp; Diagnostics</strong></a> — Diagnosing misconfigurations and failure modes.</li>
+</ul>
+
+  
+<div class="chapter-nav">
+  <a href="12. Troubleshooting.html" class="chapter-nav-btn prev">
+    <span class="nav-direction">&larr; Previous</span>
+    <span class="nav-title">12. Troubleshooting</span>
+  </a>
+  <a href="index.html" class="chapter-nav-btn next">
+    <span class="nav-direction">Next &rarr;</span>
+    <span class="nav-title">Back to Overview</span>
+  </a>
+</div>
+  </main>
+</div>
+</body>
+</html>

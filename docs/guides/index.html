@@ -18,7 +18,7 @@
         <li class="nav-item"><a href="0.%20Quickstart%20Walkthrough.html"><span class="nav-badge">0</span><span>0. Quickstart &amp; Demo</span></a></li>
         <li class="nav-item"><a href="1.%20Architecture%20Blueprint%20&%20System%20Boundaries.html"><span class="nav-badge">1</span><span>1. Architecture Blueprint</span></a></li>
         <li class="nav-item"><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><span class="nav-badge">2</span><span>2. Identity Provider</span></a></li>
-        <li class="nav-item"><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
+        <li class="nav-item"><a href="3.%20Setting%20Up%20Your%20Authorization%20Engine.html"><span class="nav-badge">3</span><span>3. Authorization Engine</span></a></li>
         <li class="nav-item"><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><span class="nav-badge">4</span><span>4. Protecting Entry Points</span></a></li>
         <li class="nav-item"><a href="5.%20Security%20Labeling%20and%20Admission%20Control%20in%20the%20Ingestion%20Pipeline.html"><span class="nav-badge">5</span><span>5. Ingestion Pipeline</span></a></li>
         <li class="nav-item"><a href="6.%20Integrating%20Your%20Vector%20Database.html"><span class="nav-badge">6</span><span>6. Integrating Vector DB</span></a></li>
@@ -27,7 +27,8 @@
         <li class="nav-item"><a href="9.%20Sanitizing%20Sensitive%20Payloads.html"><span class="nav-badge">9</span><span>9. Sanitizing Payloads</span></a></li>
         <li class="nav-item"><a href="10.%20Connecting%20to%20Enterprise%20SIEM%20and%20Log%20Aggregators.html"><span class="nav-badge">10</span><span>10. SIEM & Log Aggregators</span></a></li>
         <li class="nav-item"><a href="11.%20Enforcing%20Multi-Tenancy.html"><span class="nav-badge">11</span><span>11. Enforcing Multi-Tenancy</span></a></li>
-        <li class="nav-item"><a href="12.Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+        <li class="nav-item"><a href="12.%20Troubleshooting.html"><span class="nav-badge">12</span><span>12. Troubleshooting</span></a></li>
+        <li class="nav-item"><a href="13.%20Configuration%20Reference.html"><span class="nav-badge">13</span><span>13. Config Reference</span></a></li>
       </ul>
     </aside>
   <main class="content-wrapper">
@@ -62,7 +63,7 @@
     <em>Overview:</em> Understand how the library acts as an inline security checkpoint (Policy Enforcement Point or PEP) between your users, LangChain workflows, and data sources without relying on fragile thread-local variables.</li>
     <li><a href="2.%20Connecting%20Your%20Identity%20Provider.html"><strong> Connecting Your Identity Provider: Passing User Credentials into LangChain</strong></a></br>
     <em>Overview:</em> Implement the identity bridge (<code>IdentityBridge</code>) to extract user tokens (JWT, session, or headers) from your web frameworks (such as FastAPI or Flask) and carry caller roles securely through LangChain's native execution configuration (<code>RunnableConfig</code>).</li>
-    <li><a href="3.Setting%20Up%20Your%20Authorization%20Engine.html"><strong> Setting Up Your Authorization Engine: Choosing Between Embedded RBAC and External Policy Engines (OPA)</strong></a></br>
+    <li><a href="3.%20Setting%20Up%20Your%20Authorization%20Engine.html"><strong> Setting Up Your Authorization Engine: Choosing Between Embedded RBAC and External Policy Engines (OPA)</strong></a></br>
     <em>Overview:</em> Choose between running the zero-dependency embedded policy engine (the Policy Decision Point or PDP—the "rule evaluation brain") using local role trees, or plugging in your centralized enterprise policy service like Open Policy Agent (OPA) via an external adapter.</li>
     <li><a href="4.%20Protecting%20Agents%20and%20Execution%20Entry%20Points.html"><strong> Securing the Front Door: Protecting Agents and Execution Entry Points</strong></a></br>
     <em>Overview:</em> Wrap your standard LangChain chains and agents with entry proxies (<code>SecureRunnable</code>) that immediately reject unauthorized users before prompt construction or language model token consumption occurs.</li>
@@ -80,9 +81,19 @@
     <em>Overview:</em> Implement the audit publisher interface (<code>SecurityAuditPublisher</code>) to stream structured, tamper-evident security events into your logging systems using background workers that never delay model response times.</li>
     <li><a href="11.%20Enforcing%20Multi-Tenancy.html"><strong> Enforcing Multi-Tenancy: Isolating Workspaces, Chunks, and Execution Bounds</strong></a></br>
     <em>Overview:</em> Ensure multi-tenant partition keys (<code>tenant_id</code>) remain strictly isolated across request contexts, vector queries, and tool actions—even when using permissive fallback policies.</li>
-    <li><a href="12.Troubleshooting.html"><strong> Troubleshooting: Production Diagnostics, Common Pitfalls, and Failure Modes</strong></a></br>
+    <li><a href="12.%20Troubleshooting.html"><strong> Troubleshooting: Production Diagnostics, Common Pitfalls, and Failure Modes</strong></a></br>
     <em>Overview:</em> Diagnose and remediate common production failure modes across authentication boundaries, remote PDP circuit breakers, vector pruning, agent retry loops, and telemetry backpressure.</li>
+    <li><a href="13.%20Configuration%20Reference.html"><strong> Unified Configuration Reference: Environment Variables &amp; Property Properties</strong></a></br>
+    <em>Overview:</em> Comprehensive reference table of all configuration keys, environment variable overrides, defaults, and operational behaviors across PDP modes, two-tier caching, retry limits, in-flight DLP, and SIEM streaming.</li>
 </ol>
+  
+<div class="chapter-nav">
+  <div></div>
+  <a href="0. Quickstart Walkthrough.html" class="chapter-nav-btn next">
+    <span class="nav-direction">Next &rarr;</span>
+    <span class="nav-title">0. Quickstart & Demo</span>
+  </a>
+</div>
   </main>
 </div>
 </body>

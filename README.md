@@ -272,10 +272,13 @@ Ready to adopt `langchain-security-extension` in your organization?
 3. 📘 **[Enterprise Implementation Guide](https://prashantdev.github.io/langchain-security-extension/guides/)**  
    The complete 12-chapter guide to rolling out deterministic security in production—covering Identity Provider (IdP) wiring, CEL & OPA policy authoring, RAG metadata signing, DLP sanitization, and SIEM telemetry.
 
-4. 📚 **[API Reference](docs/api/index.html)**  
+4. ⚙️ **[Unified Configuration Reference](https://prashantdev.github.io/langchain-security-extension/guides/13.%20Configuration%20Reference.html)**  
+   Comprehensive reference table of all configuration properties, environment variable overrides, default values, and operational impacts across PDP modes, caching, retry budgets, DLP, and SIEM sinks.
+
+5. 📚 **[API Reference](docs/api/index.html)**  
    Detailed module specifications for `security_core`, `security_adapter_langchain`, and `security_pdp_opa`.
 
-5. 🧪 **[Companion Reference Application: Enterprise IT Incident Assistant](https://github.com/prashantdev/langchain-enterprise-incident-assistant)**  
+6. 🧪 **[Companion Reference Application: Enterprise IT Incident Assistant](https://github.com/prashantdev/langchain-enterprise-incident-assistant)**  
    The live demonstrator codebase used throughout the implementation guide to illustrate a real-world migration from fragile prompt guardrails to deterministic enforcement:
    - **Unhardened baseline (`main` branch):** Demonstrates real prompt injection vulnerabilities, bypassing standard LLM system prompts and causing unauthorized tool calls.
    - **Hardened implementation (`secured` branch):** Shows the complete, production-grade integration of `langchain-security-extension` following the implementation guide.
