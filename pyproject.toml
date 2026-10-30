@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "langchain-security-extension"
-version = "0.1.2"
+version = "1.0.0-1"
 description = "Enterprise RBAC and Attribute-Based Access Control (ABAC) security framework for LangChain AI applications."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [
-    { name = "LangChain Security Team" }
+    { name = "Prashant" }
 ]
 keywords = ["security", "langchain", "rbac", "abac", "ai-security", "cel"]
 classifiers = [
