@@ -54,39 +54,37 @@
 </ul>
 
 
-<h3>2. Clone Repositories Side by Side</h3>
-<p>Clone both repositories into a common workspace directory:</p>
+<h3>2. Clone the Companion Demonstrator</h3>
+<p>Clone the companion incident assistant demonstrator into your workspace:</p>
 
 <div class="code-block-container">
   <div class="code-block-header">
     <span class="code-lang">BASH</span>
   </div>
-  <pre><code class="language-bash"># Create and activate a shared virtual environment
+  <pre><code class="language-bash"># Create and activate a virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Clone the security extension library
-git clone https://github.com/prashantdev/langchain-security-extension.git
-
 # Clone the companion incident assistant demonstrator
-git clone https://github.com/prashantdev/langchain-enterprise-incident-assistant.git</code></pre>
+git clone https://github.com/prashantdev/langchain-enterprise-incident-assistant.git
+cd langchain-enterprise-incident-assistant</code></pre>
 </div>
 
-<h3>3. Install the Library and Demonstrator</h3>
-<p>Install the library in editable development mode, followed by the assistant application dependencies:</p>
+<h3>3. Install Assistant Dependencies</h3>
+<p>Install the assistant application and testing dependencies in development mode:</p>
 
 <div class="code-block-container">
   <div class="code-block-header">
     <span class="code-lang">BASH</span>
   </div>
-  <pre><code class="language-bash"># Install library
-cd langchain-security-extension
-pip install -e .
-
-# Install assistant and test dependencies
-cd ../langchain-enterprise-incident-assistant
+  <pre><code class="language-bash"># Install base assistant and test dependencies
 pip install -e ".[dev]"</code></pre>
 </div>
+
+<blockquote>
+    <p><strong>Security Extension Dependency:</strong> The <code>main</code> branch represents an unhardened baseline and has zero security dependencies. The <code>secured</code> branch includes <code>langchain-security-extension</code> directly in its <code>pyproject.toml</code> dependencies. When you switch to the <code>secured</code> branch in Step 3, simply run <code>pip install -e .</code> (or <code>pip install langchain-security-extension</code>) to install the security library.</p>
+    <p><em>(Optional for Library Contributors)</em> If you are actively developing or modifying <code>langchain-security-extension</code> locally, clone the library repository side by side and install in editable mode: <code>git clone https://github.com/prashantdev/langchain-security-extension.git &amp;&amp; pip install -e ./langchain-security-extension</code>.</p>
+</blockquote>
 
 <h3>4. Multi-Agent Model Configuration (<code>model1</code> &amp; <code>model2</code>)</h3>
 <p>The companion assistant is specifically architected to demonstrate <strong>multi-agent collaboration across heterogeneous models</strong> while enforcing a <strong>standard, uniform security posture across everything</strong>:</p>
@@ -104,7 +102,7 @@ pip install -e ".[dev]"</code></pre>
 </ul>
 
 <blockquote>
-    <p><strong>Standard Security Across Everything:</strong> Regardless of whether <code>model1</code> and <code>model2</code> share the same model or use completely different local or commercial providers, <code>langchain-security-extension</code> applies identical, zero-trust security controls across all agent steps: policy decision point (PDP) authorization, tool parameter interception, PII/credential redaction, token budgets, anti-looping protections, and SIEM audit logging.</p>
+    <p><strong>Standard Security Across Everything (Hardened <code>secured</code> Branch):</strong> While the baseline <code>main</code> branch leaves models and tools unhardened, the hardened <code>secured</code> branch uses <code>langchain-security-extension</code> to apply identical, zero-trust security controls across all agent steps—regardless of whether <code>model1</code> and <code>model2</code> share the same model or use completely different local or commercial providers. This includes policy decision point (PDP) authorization, tool parameter interception, PII/credential redaction, token budgets, anti-looping protections, and SIEM audit logging.</p>
 </blockquote>
 
 <div class="code-block-container code-block-assistant">
@@ -228,7 +226,7 @@ ollama pull llama3.2:3b</code></pre>
 <p>Next, switch to the hardened target implementation utilizing <code>langchain-security-extension</code>.</p>
 
 <h3>1. Checkout the <code>secured</code> Branch &amp; Restart the Server</h3>
-<p>In <strong>Terminal 1</strong>, stop the running server (<code>Ctrl+C</code>), checkout the hardened branch, and restart:</p>
+<p>In <strong>Terminal 1</strong>, stop the running server (<code>Ctrl+C</code>), checkout the hardened branch, install the secured dependencies (which pulls <code>langchain-security-extension</code> from PyPI), and restart:</p>
 
 <div class="code-block-container code-block-assistant">
   <div class="code-block-header">
@@ -239,6 +237,10 @@ ollama pull llama3.2:3b</code></pre>
     <span class="code-lang">BASH</span>
   </div>
   <pre><code class="language-bash">git checkout secured
+
+# Install secured dependencies (automatically installs langchain-security-extension)
+pip install -e .
+
 ./startserver.sh</code></pre>
 </div>
 
